@@ -1,0 +1,62 @@
+BootStrap: library
+From: ubuntu:20.04
+
+%post
+    apt-get -y update
+    apt-get -y install software-properties-common git build-essential cmake # need these to build pacakges
+    
+    apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
+    apt-get install -y pgplot5 
+    export PGPLOT_DIR=/usr/lib/pgplot5
+
+    apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
+
+    # install Presto 
+
+    #install iqrm
+    cd ~
+    apt-get -y install libboost-all-dev
+    #apt search libboost | grep installed    
+    git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
+    cd iqrm_apollo
+    mkdir build; cd build
+    git checkout 4b8847ecd702eed582e1d28411e96a6d650a432f # This is the last commit I can get to make
+    cmake -DBOOST_ROOT=/ ../
+    make -j
+    cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
+
+    # install rficlean
+    cd ~
+    # git clone https://github.com/josephwkania/RFIClean.git
+    git clone https://github.com/ymaan4/RFIClean.git 
+    cd RFIClean
+    mkdir -p /home/maan/pulsar_softwares/bin
+    make
+    make install
+    mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
+    rm -r /home/maan
+    #cd ~
+
+    # install yapp
+    cd ~
+    apt-get -y install libhdf5-dev
+    mkdir -p /usr/local/hdf5
+    ln -s /usr/include/hdf5/serial /usr/local/hdf5/include
+    mkdir -p /usr/local/hdf5
+    ln -s /usr/lib/x86_64-linux-gnu/hdf5/serial/lib /usr/local/hdf5/lib
+    git clone https://github.com/jayanthc/yapp.git
+    cd yapp 
+    make HDF5=yes
+    make install
+    #cd ~
+
+    #cd ~
+    #echo $(ls) 
+    #echo $(pwd)
+    #cd ~
+    #cd iqrm_apollo
+    #cd build
+    #cmake -DBOOST_ROOT=/ -DBoost_INCLUDE_DIR=/ ../
+    #make
+
+    echo "Done building"
