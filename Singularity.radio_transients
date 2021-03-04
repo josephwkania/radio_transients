@@ -2,47 +2,21 @@ BootStrap: library
 From: ubuntu:20.04
 
 %post
-    echo "Installing packaged needed for multiple programs"
+    echo "Installing packages needed for multiple programs"
     apt-get -y update
-    apt-get -y install software-properties-common git build-essential cmake # need these to build pacakges
+    apt-get -y install build-essential cmake git software-properties-common # need these to build pacakges
     
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
-    apt-get install -y pgplot5 
+    apt-get -y install pgplot5 
     export PGPLOT_DIR=/usr/lib/pgplot5
-    echo $PGPLOT_DIR
+
+    #apt-add-repository universe # for pip
+    apt-get -y install python3 python-is-python3 python3-pip
     apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
 
-    echo "Installing tempo"
+    echo "Installing iqrm_apollo"
     cd ~
-    apt-get -y install csh autoconf gfortran
-    git clone git://git.code.sf.net/p/tempo/tempo
-    cd tempo
-    ./prepare
-    ./configure
-    make
-    make install
-    export TEMPO=$PWD
-
-    echo "Installing Presto"
-    cd ~
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
-    git clone https://github.com/scottransom/presto.git
-    cd presto
-    export PRESTO=$PWD
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
-    cd $PRESTO/src
-    make prep
-    make
-    #make
-    make mpi
-    mv $PRESTO/bin/* /usr/local/bin
-    make clean
-    #cd $PRESTO ; pip install .
-
-    # : <<'END'
-    echo "Installing iqrm"
-    cd ~
-    apt-get -y install libboost-all-dev
+    apt-get -y install libboost-all-dev # libboost1.67-all-dev same build behavor as before
     #apt search libboost | grep installed    
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
@@ -51,6 +25,57 @@ From: ubuntu:20.04
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
+    echo "Built iqrm_apollo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" 
+
+    echo "Installing juyterlab"
+    pip3 install jupyterlab
+    
+    echo "Installing Tempo"
+    cd ~
+    apt-get -y install csh autoconf gfortran
+    git clone git://git.code.sf.net/p/tempo/tempo
+    cd tempo
+    ./prepare
+    ./configure
+    make
+    make install
+    export TEMPO=$PWD # Presto need to know this
+    echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+
+    echo "Installing PRESTO"
+    mkdir /opt/presto
+    cd /opt/presto
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
+    git clone https://github.com/scottransom/presto.git
+    cd presto
+    export PRESTO=$PWD
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
+    cd $PRESTO/src # links libsla, thanks https://github.com/scottransom/presto/issues/1#issuecomment-60413231
+    make prep
+    make
+    make mpi
+    make clean
+    cd $PRESTO
+    pip3 install numpy # not in requiments file
+    sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
+    pip3 install .
+    mv $PRESTO/bin/* /usr/local/bin
+    echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"    
+
+    echo "Installing psrcat"
+    cd ~
+    apt-get -y install wget tcsh
+    wget https://www.atnf.csiro.au/people/pulsar/psrcat/downloads/psrcat_pkg.tar.gz
+    tar xf psrcat_pkg.tar.gz 
+    cd psrcat_tar
+    tcsh makeit
+
+    echo "Installing pysigproc"
+    cd ~
+    git clone https://github.com/devanshkv/pysigproc.git
+    cd pysigproc
+    pip3 install . 
+    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
     echo "Installing rficlean"
     cd ~
@@ -62,8 +87,22 @@ From: ubuntu:20.04
     make install
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
+    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+ 
+    echo "Installing riptide"
+    pip3 install riptide-ffa
+ 
+    echo "Installing sigproc"
+    cd ~
+    git clone https://github.com/SixByNine/sigproc.git
+    cd sigproc
+    ./bootstrap
+    ./configure --prefix=/usr/local/
+    make
+    make install
+    echo "built sigproc at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
-    echo "Installing yapp"
+    echo "Installing YAPP"
     cd ~
     apt-get -y install libhdf5-dev
     mkdir -p /usr/local/hdf5
@@ -74,19 +113,33 @@ From: ubuntu:20.04
     cd yapp 
     make HDF5=yes
     make install
-
-    # END
-
-    #echo "Installing your"
-    #pip install git+https://github.com/thepetabyteproject/your
-
-    #echo "Installing pysigproc"
-    #pip install git+https://github.com/devanshkv/pysigproc
-
+    echo "Built YAPP at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    
+    echo "Installing your"
+    cd ~
+    git clone https://github.com/thepetabyteproject/your.git
+    cd your
+    pip3 install .
+    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+        
     echo "Done building"
 
 %environment
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/root/tempo
-    export PRESTO=/root/presto
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
+    export PRESTO=/opt/presto
+    export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
+
+%help 
+    This container has the following programs:
+    iqrm_apollo   https://gitlab.com/kmrajwade/iqrm_apollo
+    jupyterlab    https://jupyter.org/
+    PRESTO        https://www.cv.nrao.edu/~sransom/presto/
+    psrcat        https://www.atnf.csiro.au/people/pulsar/psrcat/download.html
+    pysigproc     https://github.com/devanshkv/pysigproc
+    riptide       https://github.com/v-morello/riptide
+    sigproc       https://github.com/SixByNine/sigproc
+    Tempo         http://tempo.sourceforge.net/
+    RFIClean      https://github.com/ymaan4/RFIClean
+    YAPP          https://github.com/jayanthc/yapp
+    your          https://github.com/thepetabyteproject/your
