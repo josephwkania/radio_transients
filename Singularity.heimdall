@@ -1,0 +1,123 @@
+Bootstrap: docker
+From:  nvidia/cuda:10.2-devel
+
+%post
+    apt-get update # update and install packages we need for the build
+    apt-get -y install autoconf build-essential csh git libboost-dev libtool libtool-bin python2.7 software-properties-common wget
+ 
+    # I can't get your to build in ubuntu's python3.7, llvmlite fails and there is no clear way around this
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh -q
+    bash ~/miniconda.sh -b -p /usr/local/miniconda
+    rm ~/miniconda.sh
+    eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    conda init
+    conda create -y --name RT python=3.7
+    conda activate RT    
+
+    echo "Building FETCH"
+    conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
+    conda install -y -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml=3.13
+    git clone https://github.com/devanshkv/fetch.git
+    cd fetch
+    pip install . 
+    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf fetch
+
+    echo "Installing jupyterlab"
+    # Not needed for any in particular, but might be useful
+    conda install -c conda-forge jupyterlab
+
+    # Dirs for Heimdall build
+    mkdir ~/source # build soft 
+    mkdir ~/software # put binaries here
+
+    echo "Building Dedisp"
+    mkdir -p /root/software/dedisp/include # dedisp need these
+    mkdir -p /root/software/dedisp/lib/
+
+    cd ~/source
+    git clone https://github.com/ajameson/dedisp.git
+    cd dedisp
+    make INSTALL_DIR=$HOME/software/dedisp install
+    cp ~/software/dedisp/lib/* /usr/local/lib
+    export LD_LIBRARY_PATH=LD_LIBRARY_PATH:~/software/dedisp
+    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+
+    echo "Building Psrdada"
+    cd ~/source
+    export CFLAGS="-fopenmp -fPIC"
+    export CXXFLAGS="-fopenmp -fPIC"
+    git clone https://git.code.sf.net/p/psrdada/code psrdada
+    cd psrdada
+    git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
+    # Sometime after this commit, a new test was added and this fails
+    ./bootstrap
+    ./configure --prefix=$HOME/software/psrdada
+    make
+    make install
+    cp -r ~/software/psrdada/bin/* /usr/local/bin
+    cp -r ~/software/psrdada/lib/* /usr/local/lib
+    cp -r ~/software/psrdada/include/* /usr/include
+    echo "built psrdada at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+
+    export PATH=$PATH:/usr/local/cuda
+    echo "Building Heimdall"
+    cd ~/source
+    ln -s /usr/bin/python2.7 /usr/bin/python # needs py27 to build
+    git clone git://git.code.sf.net/p/heimdall-astro/code heimdall
+    cd heimdall
+    ./bootstrap
+    ./configure --prefix=$HOME/software/heimdall/linux_64 --with-psrdada-dir=$HOME/software/psrdada --with-dedisp-dir=$HOME/software/dedisp --with-cuda-dir=/usr/local/cuda
+    sed -i -e 's+-I/root/software/psrdada/include -fopenmp+-I/root/software/psrdada/include+' Pipeline/Makefile
+    # sed -n 92p Pipeline/Makefile check if line is changed
+    make install
+    mv ~/software/heimdall/linux_64/bin/* /usr/local/bin
+    echo "built Heimdall at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+ 
+    rm /usr/bin/python # don't need python linked after heimdall is built
+    rm -rf software source # clean up after heimdall build
+
+    echo "Installing your"
+    cd ~
+    git clone https://github.com/thepetabyteproject/your.git
+    cd your
+    pip install .
+    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf your
+ 
+    echo "Installing psrdada-python"
+    cd ~
+    git clone https://github.com/TRASAL/psrdada-python.git
+    cd psrdada-python
+    pip install -r requirements.txt
+    # add lib and include paths to setup.py
+    sed -i "51 a LIBRARY_DIRS.append('/usr/local/lib')" setup.py
+    sed -i "51 a INCLUDE_DIRS.append('/usr/include')" setup.py
+    make
+    make install
+    echo "built psrdada-python at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf psrdada-python 
+
+%environment
+    export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
+    eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    conda init
+    conda activate RT
+
+%runscript
+    eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    conda init
+    conda activate RT # activate RT on entering container
+
+%help
+This container is for running your with heimdall on dada buffers
+
+    Payload:
+    CUDA 10.2         
+    fetch          https://github.com/devanshkv/fetch
+    jupyterlab     https://jupyter.org
+    heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
+    - dedisp       https://github.com/ajameson/dedisp
+    - psrdada      http://psrdada.sourceforge.net/
+    psrdada-python https://github.com/TRASAL/psrdada-python
+    your           https://github.com/thepetabyteproject/your 
