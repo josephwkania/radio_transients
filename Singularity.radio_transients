@@ -16,8 +16,7 @@ From: ubuntu:20.04
 
     echo "Installing iqrm_apollo"
     cd ~
-    apt-get -y install libboost-all-dev # libboost1.67-all-dev same build behavor as before
-    #apt search libboost | grep installed    
+    apt-get -y install libboost1.67-all-dev # iqrm does not like 1.71 versions
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
     mkdir build; cd build
@@ -26,12 +25,13 @@ From: ubuntu:20.04
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
     echo "Built iqrm_apollo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" 
+    cd ~ && rm -rf iqrm_apollo    
 
     echo "Installing juyterlab"
     pip3 install jupyterlab
     
     echo "Installing Tempo"
-    cd ~
+    cd /usr/local #put file here so we can access them later
     apt-get -y install csh autoconf gfortran
     git clone git://git.code.sf.net/p/tempo/tempo
     cd tempo
@@ -43,8 +43,8 @@ From: ubuntu:20.04
     echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
     echo "Installing PRESTO"
-    mkdir /opt/presto
-    cd /opt/presto
+    mkdir /usr/local/presto
+    cd /usr/local/presto
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
     git clone https://github.com/scottransom/presto.git
     cd presto
@@ -69,6 +69,10 @@ From: ubuntu:20.04
     tar xf psrcat_pkg.tar.gz 
     cd psrcat_tar
     tcsh makeit
+    mv psrcat /usr/local/bin
+    mv *.db /usr/local
+    echo "Built psrcat"
+    cd ~ && rm -rf psrcat_tar 
 
     echo "Installing pysigproc"
     cd ~
@@ -76,6 +80,7 @@ From: ubuntu:20.04
     cd pysigproc
     pip3 install . 
     echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf pysigproc
 
     echo "Installing rficlean"
     cd ~
@@ -88,7 +93,8 @@ From: ubuntu:20.04
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
     echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
- 
+    cd ~ && rm -rf RFIClean 
+
     echo "Installing riptide"
     pip3 install riptide-ffa
  
@@ -100,7 +106,8 @@ From: ubuntu:20.04
     ./configure --prefix=/usr/local/
     make
     make install
-    echo "built sigproc at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Built sigproc at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf sigproc
 
     echo "Installing YAPP"
     cd ~
@@ -114,21 +121,24 @@ From: ubuntu:20.04
     make HDF5=yes
     make install
     echo "Built YAPP at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-    
+    cd ~ && rm -rf yapp    
+
     echo "Installing your"
     cd ~
     git clone https://github.com/thepetabyteproject/your.git
     cd your
     pip3 install .
-    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-        
+    echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf your        
+
     echo "Done building"
 
 %environment
     export PGPLOT_DIR=/usr/lib/pgplot5
-    export TEMPO=/root/tempo
-    export PRESTO=/opt/presto
+    export TEMPO=/usr/local/tempo
+    export PRESTO=/usr/local/presto
     export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
+    export PSRCAT_FILE=/usr/local/psrcat.db
 
 %help 
     This container has the following programs:
