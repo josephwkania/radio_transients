@@ -4,15 +4,28 @@ From: ubuntu:20.04
 %post
     echo "Installing packages needed for multiple programs"
     apt-get -y update
-    apt-get -y install build-essential cmake git software-properties-common # need these to build pacakges
+    apt-get -y install build-essential cmake git software-properties-common wget # need these to build pacakges
     
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
     apt-get -y install pgplot5 
     export PGPLOT_DIR=/usr/lib/pgplot5
 
-    #apt-add-repository universe # for pip
-    apt-get -y install python3 python-is-python3 python3-pip
+    # apt-get -y install python3 python-is-python3 python3-pip # use conda instead
     apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
+    
+    # use conda so everthing is compatiable with the cuda-10-0 container
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh -q
+    bash ~/miniconda.sh -b -p /usr/local/miniconda
+    rm ~/miniconda.sh
+    eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    conda init
+    conda create -y --name RT python=3.7
+    conda activate RT
+
+    # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
+    echo "## Activate RT environment" >> /.singularity_bash
+    echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
+    echo "conda activate RT" >> /.singularity_bash
 
     echo "Installing iqrm_apollo"
     cd ~
@@ -28,8 +41,9 @@ From: ubuntu:20.04
     cd ~ && rm -rf iqrm_apollo    
 
     echo "Installing juyterlab"
-    pip3 install jupyterlab
-    
+    # pip3 install jupyterlab
+    conda install -y -c conda-forge jupyterlab
+
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
     apt-get -y install csh autoconf gfortran
@@ -56,7 +70,8 @@ From: ubuntu:20.04
     make mpi
     make clean
     cd $PRESTO
-    pip3 install numpy # not in requiments file
+    #pip3 install numpy # not in requiments file
+    conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip3 install .
     mv $PRESTO/bin/* /usr/local/bin
@@ -64,7 +79,7 @@ From: ubuntu:20.04
 
     echo "Installing psrcat"
     cd ~
-    apt-get -y install wget tcsh
+    apt-get -y install tcsh
     wget https://www.atnf.csiro.au/people/pulsar/psrcat/downloads/psrcat_pkg.tar.gz
     tar xf psrcat_pkg.tar.gz 
     cd psrcat_tar
@@ -78,7 +93,7 @@ From: ubuntu:20.04
     cd ~
     git clone https://github.com/devanshkv/pysigproc.git
     cd pysigproc
-    pip3 install . 
+    pip install . 
     echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf pysigproc
 
@@ -96,7 +111,7 @@ From: ubuntu:20.04
     cd ~ && rm -rf RFIClean 
 
     echo "Installing riptide"
-    pip3 install riptide-ffa
+    pip install riptide-ffa
  
     echo "Installing sigproc"
     cd ~
@@ -127,21 +142,38 @@ From: ubuntu:20.04
     cd ~
     git clone https://github.com/thepetabyteproject/your.git
     cd your
-    pip3 install .
+    pip install .
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your        
 
     echo "Done building"
 
 %environment
+    # For conda
+    action="${0##*/}"
+    if [ "$action" = "shell" ]; then
+        if [ "${SINGULARITY_SHELL:-}" = "/bin/bash" ]; then
+            set -- --noprofile --init-file /.singularity_bash
+        elif test -z "${SINGULARITY_SHELL:-}"; then
+            export SINGULARITY_SHELL=/bin/bash
+            set -- --noprofile --init-file /.singularity_bash
+        fi
+    fi
+
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/usr/local/tempo
     export PRESTO=/usr/local/presto
     export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
     export PSRCAT_FILE=/usr/local/psrcat.db
 
-%help 
-    This container has the following programs:
+%runscript
+    exec /usr/local/miniconda/RT/bin/"$@"
+    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+
+%help
+    This container has CPU software to search for radio transients.
+        
+    Contains the following programs:
     iqrm_apollo   https://gitlab.com/kmrajwade/iqrm_apollo
     jupyterlab    https://jupyter.org/
     PRESTO        https://www.cv.nrao.edu/~sransom/presto/
@@ -153,3 +185,8 @@ From: ubuntu:20.04
     RFIClean      https://github.com/ymaan4/RFIClean
     YAPP          https://github.com/jayanthc/yapp
     your          https://github.com/thepetabyteproject/your
+
+%labels
+    Author Joseph W Kania
+    Version v0.0.1
+

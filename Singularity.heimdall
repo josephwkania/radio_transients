@@ -3,10 +3,9 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
 
 %post
     apt-get update # update and install packages we need for the build
-    #apt-get -y install autoconf build-essential csh git libboost-dev libtool libtool-bin python2.7 software-properties-common wget
+    apt-get -y install autoconf build-essential csh git libboost-dev libtool libtool-bin python2.7 software-properties-common wget
  
     # I can't get your to build in ubuntu's python3.7, llvmlite fails and there is no clear way around this
-    apt-get -y install wget
     wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh -q
     bash ~/miniconda.sh -b -p /usr/local/miniconda
     rm ~/miniconda.sh
@@ -14,10 +13,12 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
     conda init
     conda create -y --name RT python=3.7
     conda activate RT
+
+    # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
     echo "## Activate RT environment" >> /.singularity_bash
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash    
-    : <<'END'
+
     echo "Building FETCH"
     conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
     conda install -y -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml=3.13
@@ -29,7 +30,7 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
 
     echo "Installing jupyterlab"
     # Not needed for any in particular, but might be useful
-    conda install -c conda-forge jupyterlab
+    conda install -y -c conda-forge jupyterlab
 
     # Dirs for Heimdall build
     mkdir ~/source # build soft 
@@ -101,8 +102,9 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
     make install
     echo "built psrdada-python at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf psrdada-python 
-    END
+    
 %environment
+    # For conda
     action="${0##*/}"
     if [ "$action" = "shell" ]; then
         if [ "${SINGULARITY_SHELL:-}" = "/bin/bash" ]; then
@@ -113,29 +115,26 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
         fi
     fi
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
-    #eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    
 
 %runscript
-    #eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
-    #source /usr/local/miniconda/etc/profile.d/conda.sh
-    #source activate RT # activate RT on entering container
-    #echo "This is an Ubuntu Container with Miniconda with ENV!!"
-    #exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
-    #conda activate RT
     exec /usr/local/miniconda/RT/bin/"$@"
     exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
-%help
-This container is for running your with heimdall on dada buffers
 
-    Payload:
-    CUDA 10.2         
+%help
+This container is for running your_heimdall on dada buffers for search for single pulses.
+These pulses can be classified with FETCH. 
+
+    Contains:
+    CUDA 10.0         
     fetch          https://github.com/devanshkv/fetch
     jupyterlab     https://jupyter.org
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
-    - psrdada      http://psrdada.sourceforge.net/
+    psrdada        http://psrdada.sourceforge.net/
     psrdada-python https://github.com/TRASAL/psrdada-python
     your           https://github.com/thepetabyteproject/your
 
 %labels
-    Author JWKania 
+    Author Joseph W Kania 
+    Version v0.0.1    
