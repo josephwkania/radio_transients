@@ -1,5 +1,6 @@
 Bootstrap: docker
-From:  nvidia/cuda:10.0-devel # Needed for fetch
+From:  nvidia/cuda:10.2-devel # Needed for fetch
+
 
 %post
     apt-get update # update and install packages we need for the build
@@ -18,7 +19,7 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
     echo "## Activate RT environment" >> /.singularity_bash
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash    
-
+    
     echo "Building FETCH"
     conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
     conda install -y -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml=3.13
@@ -27,7 +28,7 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
     pip install . 
     echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf fetch
-
+    
     echo "Installing jupyterlab"
     # Not needed for any in particular, but might be useful
     conda install -y -c conda-forge jupyterlab
@@ -81,15 +82,7 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
  
     rm /usr/bin/python # don't need python linked after heimdall is built
     rm -rf software source # clean up after heimdall build
-
-    echo "Installing your"
-    cd ~
-    git clone https://github.com/thepetabyteproject/your.git
-    cd your
-    pip install .
-    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-    cd ~ && rm -rf your
- 
+    
     echo "Installing psrdada-python"
     cd ~
     git clone https://github.com/TRASAL/psrdada-python.git
@@ -101,8 +94,21 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
     make
     make install
     echo "built psrdada-python at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-    cd ~ && rm -rf psrdada-python 
-    
+    cd ~ && rm -rf psrdada-python
+
+    echo "Installing your"
+    cd ~
+    git clone https://github.com/thepetabyteproject/your.git
+    cd your
+    pip install .
+    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf your
+
+    apt-get -y autoremove 
+    apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
+
+    echo "Done building!" 
+
 %environment
     # For conda
     action="${0##*/}"
@@ -114,12 +120,16 @@ From:  nvidia/cuda:10.0-devel # Needed for fetch
             set -- --noprofile --init-file /.singularity_bash
         fi
     fi
-    export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
     
+    source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the continer
+
+    # export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
+   
 
 %runscript
     exec /usr/local/miniconda/RT/bin/"$@"
     exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+
 
 %help
 This container is for running your_heimdall on dada buffers for search for single pulses.
@@ -134,6 +144,7 @@ These pulses can be classified with FETCH.
     psrdada        http://psrdada.sourceforge.net/
     psrdada-python https://github.com/TRASAL/psrdada-python
     your           https://github.com/thepetabyteproject/your
+
 
 %labels
     Author Joseph W Kania 
