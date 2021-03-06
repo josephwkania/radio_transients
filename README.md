@@ -14,7 +14,7 @@ There are three containers
 ### radio_transients
 Contains everything (CPU+GPU)
  
-    CUDA 10.0
+    CUDA 10.2
     fetch          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
@@ -51,7 +51,7 @@ Contains CPU based programs
 ### radio_transients_gpu
 Contains gpu based programs
 
-    CUDA 10.0
+    CUDA 10.2
     fetch      
     jupyterlab
     heimdall
@@ -59,4 +59,20 @@ Contains gpu based programs
     psrdada 
     psrdada-python
     your
+
+### How to use
+You can mount a directory with `-B /dir/on/host:/mnt`, which will mount `/dir/on/host` to `/mnt` in the container. 
+Your `$HOME` automatically gets mounted.
+
+For the gpu processes, you must pass `--nv` when running singularity.
+
+`singularity shell --nv -B /data:/mnt radio_transients_gpu.simg` 
+will mount `/data` to `/mnt`, give you GPU access, and drop you into the interactive shell. 
+
+`singularity exec --nv -B /data:/mnt radio_transients_gpu.simg your_heimdall.py -f /mnt/data.fil` 
+will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
+If the data is in your `$HOME` of a subdirectory, you should need to mount. 
+
+### shub
+These are build by singularity hub at: 
 
