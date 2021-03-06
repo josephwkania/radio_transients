@@ -5,6 +5,8 @@
 [![Forks](https://img.shields.io/github/forks/josephwkania/radio_transients?style=flat-square)]()
 [![Stars](https://img.shields.io/github/stars/josephwkania/radio_transients?style=flat-square)]()
 [![License](https://img.shields.io/github/license/josephwkania/radio_transients?style=flat-square)]()
+[![https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg](https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg)](https://singularity-hub.org/collections/5231)
+
 
 ## Overview
 
@@ -74,5 +76,7 @@ will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py with
 If the data is in your `$HOME` of a subdirectory, you should need to mount. 
 
 ### shub
-These are build by singularity hub at: 
+These are build by singularity hub at: https://singularity-hub.org/collections/5231
 
+### Improvments
+If you come accross bug or have suggestions for improvments, let me know or submit a pull request.
