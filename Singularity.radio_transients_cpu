@@ -151,7 +151,7 @@ From: ubuntu:20.04
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
 
-    echo "Done building"
+    echo "Done building!"
 
 
 %environment

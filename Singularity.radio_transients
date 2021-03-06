@@ -244,7 +244,9 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
     export PSRCAT_FILE=/usr/local/psrcat.db
    
-    
+    export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs
+
+
 %runscript
     exec /usr/local/miniconda/RT/bin/"$@"
     exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
