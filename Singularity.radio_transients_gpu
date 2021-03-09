@@ -51,11 +51,10 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
     echo "Building Psrdada"
     cd ~/source
-    export CFLAGS="-fopenmp -fPIC"
-    export CXXFLAGS="-fopenmp -fPIC"
+    export CFLAGS="-fopenmp -fPIC" # needs to be complied with fPIC for psrdada-python to work
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
-    git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
+    #git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
     # Sometime after this commit, a new test was added and this fails
     ./bootstrap
     ./configure --prefix=$HOME/software/psrdada
@@ -104,6 +103,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your
 
+    apt-get -y purge autoconf build-essential git python2.7 wget # remove build time dependencies
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
 
@@ -124,7 +124,9 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the continer
 
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
-   
+  
+    export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
+
 
 %runscript
     exec /usr/local/miniconda/RT/bin/"$@"
@@ -148,4 +150,4 @@ These pulses can be classified with FETCH.
 
 %labels
     Author Joseph W Kania 
-    Version v0.0.1    
+    Version v0.0.2    
