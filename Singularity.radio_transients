@@ -218,6 +218,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your
  
+     apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
     apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
 
@@ -245,7 +246,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export PSRCAT_FILE=/usr/local/psrcat.db
    
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs
-
+   
+    export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript
     exec /usr/local/miniconda/RT/bin/"$@"
@@ -277,6 +279,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
 %labels
     Author Joseph W Kania
-    Version v0.0.1
+    Version v0.0.2
 
 

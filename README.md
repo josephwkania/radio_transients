@@ -34,6 +34,8 @@ Contains everything (CPU+GPU)
     YAPP           https://github.com/jayanthc/yapp
     your           https://github.com/thepetabyteproject/your
 
+Get with
+`singularity pull shub://josephwkania/radio_transients:radio_transients`
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -48,7 +50,10 @@ Contains CPU based programs
     Tempo 
     RFIClean
     YAPP  
-    your  
+    your
+
+Get with
+`singularity pull shub://josephwkania/radio_transients:radio_transients_cpu`  
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -62,6 +67,9 @@ Contains gpu based programs
     psrdada-python
     your
 
+Get with
+`singularity pull shub://josephwkania/radio_transients:radio_transients_gpu`
+
 ### How to use
 You can mount a directory with `-B /dir/on/host:/mnt`, which will mount `/dir/on/host` to `/mnt` in the container. 
 Your `$HOME` automatically gets mounted.
@@ -73,7 +81,8 @@ will mount `/data` to `/mnt`, give you GPU access, and drop you into the interac
 
 `singularity exec --nv -B /data:/mnt radio_transients_gpu.simg your_heimdall.py -f /mnt/data.fil` 
 will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
-If the data is in your `$HOME` of a subdirectory, you should need to mount. 
+
+If your data is in `$HOME` or `$PWD`, you shouldn't need to mount. 
 
 ### shub
 These are build by singularity hub at: https://singularity-hub.org/collections/5231

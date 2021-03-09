@@ -147,7 +147,8 @@ From: ubuntu:20.04
     pip install .
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your        
-    
+
+    apt-get -y purge cmake build-essential git wget # remove build time dependencies
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
 
@@ -199,5 +200,5 @@ From: ubuntu:20.04
 
 %labels
     Author Joseph W Kania
-    Version v0.0.1
+    Version v0.0.2
 
