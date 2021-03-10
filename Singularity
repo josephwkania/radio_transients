@@ -5,7 +5,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
 %post
     apt-get update # update and install packages we need for the build
-    apt-get -y install autoconf build-essential cmake csh git libboost-all-dev libtool libtool-bin python2.7 software-properties-common wget
+    apt-get -y install autoconf build-essential cmake csh git htop libboost-all-dev libtool libtool-bin python2.7 software-properties-common wget
     # need these to build pacakges
 
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
@@ -57,10 +57,9 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "Building Psrdada"
     cd ~/source
     export CFLAGS="-fopenmp -fPIC"
-    export CXXFLAGS="-fopenmp -fPIC"
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
-    git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
+    # git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
     # Sometime after this commit, a new test was added and this fails
     ./bootstrap
     ./configure --prefix=$HOME/software/psrdada
@@ -132,7 +131,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     #pip3 install numpy # not in requiments file
     conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
-    pip3 install .
+    pip install .
     mv $PRESTO/bin/* /usr/local/bin
     echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
@@ -218,7 +217,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your
  
-     apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
+    apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
     apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
 
@@ -258,10 +257,11 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     This container has software to search for radio transients.
 
     Contains the following programs:
-    CUDA 10.0
+    CUDA 10.2
     fetch          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
+    htop           https://htop.dev/
     iqrm_apollo    https://gitlab.com/kmrajwade/iqrm_apollo
     jupyterlab     https://jupyter.org/
     PRESTO         https://www.cv.nrao.edu/~sransom/presto/
@@ -279,6 +279,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
 %labels
     Author Joseph W Kania
-    Version v0.0.2
+    Version v0.0.3
 
 

@@ -5,7 +5,7 @@ From: ubuntu:20.04
 %post
     echo "Installing packages needed for multiple programs"
     apt-get -y update
-    apt-get -y install build-essential cmake git software-properties-common wget # need these to build pacakges
+    apt-get -y install build-essential cmake git htop software-properties-common wget # need these to build pacakges
     
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
     apt-get -y install pgplot5 
@@ -75,7 +75,7 @@ From: ubuntu:20.04
     #pip3 install numpy # not in requiments file
     conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
-    pip3 install .
+    pip install .
     mv $PRESTO/bin/* /usr/local/bin
     echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"    
 
@@ -185,6 +185,7 @@ From: ubuntu:20.04
     This container has CPU software to search for radio transients.
         
     Contains the following programs:
+    htop          https://htop.dev/
     iqrm_apollo   https://gitlab.com/kmrajwade/iqrm_apollo
     jupyterlab    https://jupyter.org/
     PRESTO        https://www.cv.nrao.edu/~sransom/presto/
