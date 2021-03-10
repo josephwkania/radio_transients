@@ -20,6 +20,7 @@ Contains everything (CPU+GPU)
     fetch          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
+    htop           https://htop.dev/
     iqrm_apollo    https://gitlab.com/kmrajwade/iqrm_apollo
     jupyterlab     https://jupyter.org/
     PRESTO         https://www.cv.nrao.edu/~sransom/presto/
@@ -35,11 +36,12 @@ Contains everything (CPU+GPU)
     your           https://github.com/thepetabyteproject/your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients:radio_transients`
+`singularity pull shub://josephwkania/radio_transients`
 
 ### radio_transients_cpu
 Contains CPU based programs
 
+    htop
     iqrm_apollo
     jupyterlab   
     PRESTO
@@ -53,7 +55,7 @@ Contains CPU based programs
     your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients:radio_transients_cpu`  
+`singularity pull shub://josephwkania/radio_transients:cpu`  
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -62,30 +64,34 @@ Contains gpu based programs
     fetch      
     jupyterlab
     heimdall
-    - dedisp 
+    - dedisp
+    htop 
     psrdada 
     psrdada-python
     your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients:radio_transients_gpu`
+`singularity pull shub://josephwkania/radio_transients:gpu`
 
 ### How to use
+Your `$HOME` `$PWD` automatically get mounted.
 You can mount a directory with `-B /dir/on/host:/mnt`, which will mount `/dir/on/host` to `/mnt` in the container. 
-Your `$HOME` automatically gets mounted.
 
 For the gpu processes, you must pass `--nv` when running singularity.
 
-`singularity shell --nv -B /data:/mnt radio_transients_gpu.simg` 
+`singularity shell --nv -B /data:/mnt radio_transients_gpu.sif` 
 will mount `/data` to `/mnt`, give you GPU access, and drop you into the interactive shell. 
 
-`singularity exec --nv -B /data:/mnt radio_transients_gpu.simg your_heimdall.py -f /mnt/data.fil` 
+`singularity exec --nv -B /data:/mnt radio_transients_gpu.sif your_heimdall.py -f /mnt/data.fil` 
 will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
 
-If your data is in `$HOME` or `$PWD`, you shouldn't need to mount. 
+All the Python scripts are installed in a Conda enviroment `RT`, this envimoment is automatically loaded.
 
 ### shub
 These are build by singularity hub at: https://singularity-hub.org/collections/5231
 
 ### Improvments
 If you come accross bug or have suggestions for improvments, let me know or submit a pull request.
+
+### Thanks
+To Kshitij Aggarwal bug reports and improvments suggestions.
