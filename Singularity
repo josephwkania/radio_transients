@@ -115,8 +115,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
     echo "Installing PRESTO"
-    mkdir /usr/local/presto
-    cd /usr/local/presto
+    # mkdir /usr/local/
+    cd /usr/local/
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich
     git clone https://github.com/scottransom/presto.git
     cd presto
@@ -128,8 +128,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make mpi
     make clean
     cd $PRESTO
-    #pip3 install numpy # not in requiments file
-    conda install -y numpy
+    pip install numpy # not in requiments file
+    #conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip install .
     mv $PRESTO/bin/* /usr/local/bin
@@ -220,6 +220,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
     apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
+    conda clean --all
 
     echo "Done building"
 

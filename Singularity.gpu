@@ -106,7 +106,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     apt-get -y purge autoconf build-essential git python2.7 wget # remove build time dependencies
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
-
+    conda clean --all
+    
     echo "Done building!" 
 
 %environment
@@ -151,4 +152,4 @@ These pulses can be classified with FETCH.
 
 %labels
     Author Joseph W Kania 
-    Version v0.0.2    
+    Version v0.0.3  

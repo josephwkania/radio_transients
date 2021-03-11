@@ -74,7 +74,7 @@ Get with
 `singularity pull shub://josephwkania/radio_transients:gpu`
 
 ### How to use
-Your `$HOME` `$PWD` automatically get mounted.
+Your `$HOME` automatically gets mounted.
 You can mount a directory with `-B /dir/on/host:/mnt`, which will mount `/dir/on/host` to `/mnt` in the container. 
 
 For the gpu processes, you must pass `--nv` when running singularity.
@@ -94,4 +94,4 @@ These are build by singularity hub at: https://singularity-hub.org/collections/5
 If you come accross bug or have suggestions for improvments, let me know or submit a pull request.
 
 ### Thanks
-To Kshitij Aggarwal bug reports and improvments suggestions.
+To Kshitij Aggarwal for bug reports and suggestions.

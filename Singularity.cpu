@@ -14,7 +14,7 @@ From: ubuntu:20.04
     # apt-get -y install python3 python-is-python3 python3-pip # use conda instead
     apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
     
-    # use conda so everthing is compatiable with the cuda-10-0 container
+    # use conda so everthing is compatiable with the cuda-10-2 container
     wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh -q
     bash ~/miniconda.sh -b -p /usr/local/miniconda
     rm ~/miniconda.sh
@@ -59,8 +59,8 @@ From: ubuntu:20.04
     echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
 
     echo "Installing PRESTO"
-    mkdir /usr/local/presto
-    cd /usr/local/presto
+    # mkdir /usr/local/
+    cd /usr/local/
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
     git clone https://github.com/scottransom/presto.git
     cd presto
@@ -73,10 +73,11 @@ From: ubuntu:20.04
     make clean
     cd $PRESTO
     #pip3 install numpy # not in requiments file
-    conda install -y numpy
+    #conda install -y numpy
+    pip install  numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip install .
-    mv $PRESTO/bin/* /usr/local/bin
+    cp $PRESTO/bin/* /usr/local/bin
     echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"    
 
     echo "Installing psrcat"
@@ -151,6 +152,7 @@ From: ubuntu:20.04
     apt-get -y purge cmake build-essential git wget # remove build time dependencies
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
+    conda clean --all
 
     echo "Done building!"
 
@@ -201,5 +203,5 @@ From: ubuntu:20.04
 
 %labels
     Author Joseph W Kania
-    Version v0.0.2
+    Version v0.0.3
 
