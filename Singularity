@@ -12,7 +12,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     apt-get -y install pgplot5
     export PGPLOT_DIR=/usr/lib/pgplot5
 
-    # apt-get -y install python3 python-is-python3 python3-pip # use conda instead
+    apt-get -y install python3 python3-pip # PRESTO needs its own python env separate from FETCH, else PRESTO fails
     apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
     
     # I can't get your to build in ubuntu's python3.7, llvmlite fails and there is no clear way around this
@@ -29,16 +29,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash
 
-    pip install numpy # make sure pip numpy gets installed to avoid Presto python problems
-
-    echo "Building FETCH"
-    conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
-    conda install -y -c anaconda keras scikit-learn pandas scipy matplotlib scikit-image tqdm numba pyyaml=3.13
-    git clone https://github.com/devanshkv/fetch.git
-    cd fetch
-    pip install .
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-    cd ~ && rm -rf fetch
+    # moved FETCH install to last, try to minimize the impact of conda installs on presto 
 
     # Dirs for Heimdall build
     mkdir ~/source # build soft
@@ -128,7 +119,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make mpi
     make clean
     cd $PRESTO
-    pip install numpy # not in requiments file
+    pip install numpy
+    #/usr/bin/pip3 install numpy # not in requiments file
     #conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip install .
@@ -216,9 +208,19 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     pip install .
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your
- 
-    apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
-    apt-get -y autoremove
+
+    echo "Building FETCH"
+    pip install tensorflow-gpu==1.13.1
+    pip install keras scikit-learn pandas scikit-image tqdm numba pyyaml==3.13
+    conda install -y  cudatoolkit==10.0.130
+    git clone https://github.com/devanshkv/fetch.git
+    cd fetch
+    pip install .
+    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf fetch
+
+    #apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
+    #apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
     conda clean --all
 
