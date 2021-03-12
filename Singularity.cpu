@@ -21,12 +21,14 @@ From: ubuntu:20.04
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
     conda create -y --name RT python=3.7
-    conda activate RT
-
+    conda activate RT 
+ 
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
     echo "## Activate RT environment" >> /.singularity_bash
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash
+
+    pip install numpy # make sure pip numpy get installed to avoid presto python error
 
     echo "Installing iqrm_apollo"
     cd ~
@@ -72,9 +74,7 @@ From: ubuntu:20.04
     make mpi
     make clean
     cd $PRESTO
-    #pip3 install numpy # not in requiments file
-    #conda install -y numpy
-    pip install  numpy
+    # pip install  numpy # installed at top
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip install .
     cp $PRESTO/bin/* /usr/local/bin

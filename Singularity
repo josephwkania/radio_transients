@@ -23,15 +23,17 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     conda init
     conda create -y --name RT python=3.7
     conda activate RT
-
+        
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
     echo "## Activate RT environment" >> /.singularity_bash
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash
 
+    pip install numpy # make sure pip numpy gets installed to avoid Presto python problems
+
     echo "Building FETCH"
     conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
-    conda install -y -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml=3.13
+    conda install -y -c anaconda keras scikit-learn pandas scipy matplotlib scikit-image tqdm numba pyyaml=3.13
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     pip install .
@@ -59,8 +61,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export CFLAGS="-fopenmp -fPIC"
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
-    # git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
-    # Sometime after this commit, a new test was added and this fails
     ./bootstrap
     ./configure --prefix=$HOME/software/psrdada
     make
