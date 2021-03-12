@@ -88,7 +88,7 @@ will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py with
 All the Python scripts are installed in a Conda enviroment `RT`, this envimoment is automatically loaded.
 
 ### shub
-These are build by singularity hub at: https://singularity-hub.org/collections/5231
+These are built on commit by Singularity Hub at: https://singularity-hub.org/collections/5231
 
 ### Improvments
 If you come accross bug or have suggestions for improvments, let me know or submit a pull request.

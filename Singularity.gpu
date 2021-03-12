@@ -54,8 +54,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export CFLAGS="-fopenmp -fPIC" # needs to be complied with fPIC for psrdada-python to work
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
-    #git checkout 76e4c6779d8a029449ea54a2fd08e3fb31d45104 # This corresponds to the version on Bowser
-    # Sometime after this commit, a new test was added and this fails
     ./bootstrap
     ./configure --prefix=$HOME/software/psrdada
     make
