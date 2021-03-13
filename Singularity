@@ -21,7 +21,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     rm ~/miniconda.sh
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
-    conda create -y --name RT #python=3.7
+    conda create -y --name RT python=3.7
     #conda activate RT
         
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
