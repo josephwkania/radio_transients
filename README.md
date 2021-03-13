@@ -17,7 +17,7 @@ There are three containers
 Contains everything (CPU+GPU)
  
     CUDA 10.2
-    fetch          https://github.com/devanshkv/fetch
+    FETCH          https://github.com/devanshkv/fetch  -- In Conda enviroment `FE`
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
     htop           https://htop.dev/
@@ -37,6 +37,13 @@ Contains everything (CPU+GPU)
 
 Get with
 `singularity pull shub://josephwkania/radio_transients`
+
+*One of FETCH's dependecies causes PRESTO's Python scripts to fail. 
+This necessiated putting them in different enviroments. 
+Everything exept for FETCH is in `RT`, which is loaded as default.
+FETCH is in `FE`, in the shell you can activate this 
+with `conda activate FE`. If you need access outside the container,
+you should use radio_transients:gpu, which has FETCH in the default enviroment. 
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -61,7 +68,7 @@ Get with
 Contains gpu based programs
 
     CUDA 10.2
-    fetch      
+    FETCH      
     jupyterlab
     heimdall
     - dedisp

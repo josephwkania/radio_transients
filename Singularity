@@ -21,15 +21,26 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     rm ~/miniconda.sh
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
-    conda create -y --name RT python=3.7
-    conda activate RT
+    conda create -y --name RT #python=3.7
+    #conda activate RT
         
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
     echo "## Activate RT environment" >> /.singularity_bash
     echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     echo "conda activate RT" >> /.singularity_bash
 
-    # moved FETCH install to last, try to minimize the impact of conda installs on presto 
+    conda create -y --name FE python=3.7
+    conda activate FE
+    echo "Building FETCH"
+    conda install -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
+    conda install -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml=3.13
+    git clone https://github.com/devanshkv/fetch.git
+    cd fetch
+    pip install .
+    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    cd ~ && rm -rf fetch
+
+    conda activate RT
 
     # Dirs for Heimdall build
     mkdir ~/source # build soft
@@ -208,17 +219,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     pip install .
     echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
     cd ~ && rm -rf your
-
-    echo "Building FETCH"
-    pip install tensorflow-gpu==1.13.1
-    pip install keras scikit-learn pandas scikit-image tqdm numba pyyaml==3.13
-    conda install -y  cudatoolkit==10.0.130
-    git clone https://github.com/devanshkv/fetch.git
-    cd fetch
-    pip install .
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
-    cd ~ && rm -rf fetch
-
+    
     #apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
     #apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
@@ -252,8 +253,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript
-    exec /usr/local/miniconda/RT/bin/"$@"
-    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    # exec /usr/local/miniconda/RT/bin/"$@"
+    # exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
 
 
 %help
