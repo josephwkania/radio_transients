@@ -212,9 +212,8 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     cd ~ && rm -rf your
 
     echo "Building FETCH"
-    pip install tensorflow-gpu==1.13.1
-    pip install keras scikit-learn pandas scikit-image tqdm numba pyyaml==3.13
-    conda install -y  cudatoolkit==10.0.130
+    conda install -y -c anaconda cudatoolkit==10.0.130 tensorflow-gpu==1.13.1
+    conda install -y -c anaconda keras scikit-learn pandas scipy numpy matplotlib scikit-image tqdm numba pyyaml==3.13
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     pip install .
