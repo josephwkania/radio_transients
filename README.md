@@ -40,10 +40,10 @@ Get with
 
 *One of FETCH's dependecies causes PRESTO's Python scripts to fail. 
 This necessiated putting them in different enviroments. 
-Everything exept for FETCH is in `RT`, which is loaded as default.
-FETCH is in `FE`, in the shell you can activate this 
-with `conda activate FE`. If you need access outside the container,
-you should use radio_transients:gpu, which has FETCH in the default enviroment. 
+Everything exept for PRESTO is in `RT`, which is loaded by default.
+PRESTO is in `PE`, in the shell you can activate this 
+with `conda activate PE`. If you need access outside the container,
+you should use radio_transients:cpu, which has RPESTO in the default enviroment. 
 
 ### radio_transients_cpu
 Contains CPU based programs
