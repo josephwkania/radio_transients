@@ -30,7 +30,6 @@ From: arm32v7/ubuntu
     #echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
     #echo "conda activate RT" >> /.singularity_bash
     
-
     echo "Installing iqrm_apollo"
     cd ~
     apt-get -y install libboost1.67-all-dev # iqrm does not like 1.71 versions
@@ -56,7 +55,7 @@ From: arm32v7/ubuntu
     cd tempo
     ./prepare
     ./configure
-    sed -i 's/real\*10 frb/real\*8 frb/' src/bnrydds.f
+    sed -i 's/real\*10 frb/real\*8 frb/' src/bnrydds.f # 10 bit variables are not supported
     make
     make install
     export TEMPO=$PWD # Presto need to know this
@@ -137,7 +136,7 @@ From: arm32v7/ubuntu
     mkdir -p /usr/local/hdf5
     ln -s /usr/include/hdf5/serial /usr/local/hdf5/include
     mkdir -p /usr/local/hdf5
-    ln -s /usr/lib/arm-linux-gnueabihf/hdf5/serial/lib /usr/local/hdf5/lib
+    ln -s /usr/lib/arm-linux-gnueabihf/hdf5/serial/lib /usr/local/hdf5/lib # new location for arm-arch
     git clone https://github.com/jayanthc/yapp.git
     cd yapp 
     make HDF5=yes
@@ -188,7 +187,7 @@ From: arm32v7/ubuntu
 
 
 %help
-    This container has CPU software to search for radio transients.
+    This container has CPU w/arm arch software to search for radio transients.
         
     Contains the following programs:
     htop          https://htop.dev/
@@ -199,7 +198,7 @@ From: arm32v7/ubuntu
     pysigproc     https://github.com/devanshkv/pysigproc
     riptide       https://github.com/v-morello/riptide
     sigproc       https://github.com/SixByNine/sigproc
-    Tempo         http://tempo.sourceforge.net/
+    Tempo         http://tempo.sourceforge.net/ - modifiled to compile on arm
     RFIClean      https://github.com/ymaan4/RFIClean
     YAPP          https://github.com/jayanthc/yapp
     your          https://github.com/thepetabyteproject/your
