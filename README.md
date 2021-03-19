@@ -63,6 +63,7 @@ Contains CPU based programs
 
 Get with
 `singularity pull shub://josephwkania/radio_transients:cpu`  
+arm version `Singularity.arm`
 
 ### radio_transients_gpu
 Contains gpu based programs
