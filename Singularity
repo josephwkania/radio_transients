@@ -253,8 +253,9 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript
-    exec /usr/local/miniconda/RT/bin/"$@"
-    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    exec your_heimdall.py
+    # exec /usr/local/miniconda/RT/bin/"$@"
+    # exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
 
 
 %help
