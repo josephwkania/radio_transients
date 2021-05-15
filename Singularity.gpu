@@ -26,12 +26,13 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     pip install . 
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
     
     echo "Installing jupyterlab"
     # Not needed for any in particular, but might be useful
     conda install -y -c conda-forge jupyterlab
+    echo "Jupiterlab Built from conda" >> "$SINGULARITY_LABELS"
 
     # Dirs for Heimdall build
     mkdir ~/source # build soft 
@@ -47,7 +48,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make INSTALL_DIR=$HOME/software/dedisp install
     cp ~/software/dedisp/lib/* /usr/local/lib
     export LD_LIBRARY_PATH=LD_LIBRARY_PATH:~/software/dedisp
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "dedisp Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Building Psrdada"
     cd ~/source
@@ -61,7 +62,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     cp -r ~/software/psrdada/bin/* /usr/local/bin
     cp -r ~/software/psrdada/lib/* /usr/local/lib
     cp -r ~/software/psrdada/include/* /usr/include
-    echo "built psrdada at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "psrdada Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     export PATH=$PATH:/usr/local/cuda
     echo "Building Heimdall"
@@ -75,7 +76,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     # sed -n 92p Pipeline/Makefile check if line is changed
     make install
     mv ~/software/heimdall/linux_64/bin/* /usr/local/bin
-    echo "built Heimdall at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Heimdall Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
  
     rm /usr/bin/python # don't need python linked after heimdall is built
     rm -rf software source # clean up after heimdall build
@@ -90,7 +91,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     sed -i "51 a INCLUDE_DIRS.append('/usr/include')" setup.py
     make
     make install
-    echo "built psrdada-python at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "psrdada-python Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf psrdada-python
 
     echo "Installing your"
@@ -98,7 +99,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://github.com/thepetabyteproject/your.git
     cd your
     pip install .
-    echo "built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "your Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf your
 
     apt-get -y purge autoconf build-essential git python2.7 wget # remove build time dependencies
@@ -150,4 +151,5 @@ These pulses can be classified with FETCH.
 
 %labels
     Author Joseph W Kania 
-    Version v0.0.3  
+    Version v0.0.4
+    Build-date 15-May-2021
