@@ -139,7 +139,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     tcsh makeit
     mv psrcat /usr/local/bin
     mv *.db /usr/local
-    echo "psrcat no version control" >> "$SINGULARITY_LABELS"" 
+    echo "psrcat no version control" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf psrcat_tar
 
     echo "Installing psrdada-python"
