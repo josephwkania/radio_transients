@@ -7,7 +7,7 @@ From: arm32v7/ubuntu
     export DEBIAN_FRONTEND=noninteractive 
     echo "Installing packages needed for multiple programs"
     apt-get -y update
-    apt-get -y install build-essential cmake git htop software-properties-common wget # need these to build pacakges
+    apt-get -y install build-essential cmake git htop software-properties-common wget # need these to build packages
      
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
     apt-get -y install pgplot5 
@@ -41,12 +41,13 @@ From: arm32v7/ubuntu
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
-    echo "Built iqrm_apollo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" 
+    echo "iqrm_apollo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf iqrm_apollo    
 
-    apt-get -y install libffi-dev # need this depency for juyterlab
+    apt-get -y install libffi-dev # need this dependency for juyterlab
     echo "Installing juyterlab"
     pip3 install jupyterlab
+    echo "Jupiterlab Built from pip" >> "$SINGULARITY_LABELS"
 
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
@@ -59,7 +60,7 @@ From: arm32v7/ubuntu
     make
     make install
     export TEMPO=$PWD # Presto need to know this
-    echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
     # mkdir /usr/local/
@@ -79,7 +80,7 @@ From: arm32v7/ubuntu
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip3 install .
     cp $PRESTO/bin/* /usr/local/bin
-    echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"    
+    echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
@@ -91,7 +92,8 @@ From: arm32v7/ubuntu
     mv psrcat /usr/local/bin
     mv *.db /usr/local
     echo "Built psrcat"
-    cd ~ && rm -rf psrcat_tar 
+    cd ~ && rm -rf psrcat_tar
+    echo "psrcat no version control"
     
     echo "Installing pysigproc"
     cd ~
@@ -99,7 +101,7 @@ From: arm32v7/ubuntu
     git clone https://github.com/devanshkv/pysigproc.git
     cd pysigproc
     pip3 install . 
-    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "pysigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf pysigproc
 
     echo "Installing rficlean"
@@ -112,12 +114,13 @@ From: arm32v7/ubuntu
     make install
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
-    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "RFICLean Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf RFIClean 
 
     echo "Installing riptide"
     apt-get -y install python3-pandas
     pip3 install riptide-ffa
+    echo "riptide-ffa installed from pip" >> "$SINGULARITY_LABELS"
  
     echo "Installing sigproc"
     cd ~
@@ -127,7 +130,7 @@ From: arm32v7/ubuntu
     ./configure --prefix=/usr/local/
     make
     make install
-    echo "Built sigproc at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "sigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf sigproc
     
     echo "Installing YAPP"
@@ -141,7 +144,7 @@ From: arm32v7/ubuntu
     cd yapp 
     make HDF5=yes
     make install
-    echo "Built YAPP at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "YAPP Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf yapp    
 
     echo "Installing your"
@@ -149,7 +152,7 @@ From: arm32v7/ubuntu
     git clone https://github.com/thepetabyteproject/your.git
     cd your
     pip3 install .
-    echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "your built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf your        
 
     # This wants to remove libboost, which we need
@@ -172,7 +175,7 @@ From: arm32v7/ubuntu
     #    fi
     #fi
     
-    #source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the continer
+    #source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the container
 
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/usr/local/tempo
@@ -198,7 +201,7 @@ From: arm32v7/ubuntu
     pysigproc     https://github.com/devanshkv/pysigproc
     riptide       https://github.com/v-morello/riptide
     sigproc       https://github.com/SixByNine/sigproc
-    Tempo         http://tempo.sourceforge.net/ - modifiled to compile on arm
+    Tempo         http://tempo.sourceforge.net/ - modified to compile on arm
     RFIClean      https://github.com/ymaan4/RFIClean
     YAPP          https://github.com/jayanthc/yapp
     your          https://github.com/thepetabyteproject/your
@@ -206,5 +209,5 @@ From: arm32v7/ubuntu
 
 %labels
     Author Joseph W Kania
-    Version v0.0.3
+    Version v0.0.4
 
