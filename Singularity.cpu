@@ -90,7 +90,7 @@ From: ubuntu:20.04
     tcsh makeit
     mv psrcat /usr/local/bin
     mv *.db /usr/local
-    echo "psrcat no version control"
+    echo "psrcat no version control" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf psrcat_tar 
 
     echo "Installing pysigproc"
