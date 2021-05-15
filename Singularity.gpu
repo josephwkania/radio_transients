@@ -121,7 +121,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
         fi
     fi
     
-    source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the continer
+    source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the container
 
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
   

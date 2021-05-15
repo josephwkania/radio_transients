@@ -10,14 +10,14 @@
 
 ## Overview
 
-These are my Singularity Recipes for common radio transiet software.
+These are my Singularity Recipes for common radio transient software.
 There are three containers
 
 ### radio_transients
 Contains everything (CPU+GPU)
  
     CUDA 10.2
-    FETCH          https://github.com/devanshkv/fetch  -- In Conda enviroment `FE`
+    FETCH          https://github.com/devanshkv/fetch  -- In Conda environment `FE`
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
     htop           https://htop.dev/
@@ -38,12 +38,12 @@ Contains everything (CPU+GPU)
 Get with
 `singularity pull shub://josephwkania/radio_transients`
 
-*One of FETCH's dependecies causes PRESTO's Python scripts to fail. 
-This necessiated putting them in different enviroments. 
-Everything exept for PRESTO is in `RT`, which is loaded by default.
+*One of FETCH's dependencies causes PRESTO's Python scripts to fail. 
+This necessitated putting them in different environments. 
+Everything except for PRESTO is in `RT`, which is loaded by default.
 PRESTO is in `PE`, in the shell you can activate this 
 with `conda activate PE`. If you need access outside the container,
-you should use radio_transients:cpu, which has RPESTO in the default enviroment. 
+you should use radio_transients:cpu, which has PRESTO in the default environment. 
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -63,7 +63,7 @@ Contains CPU based programs
 
 Get with
 `singularity pull shub://josephwkania/radio_transients:cpu`  
-arm version `Singularity.arm`
+There is an arm version `Singularity.arm`, you can build yourself.
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -93,14 +93,16 @@ will mount `/data` to `/mnt`, give you GPU access, and drop you into the interac
 `singularity exec --nv -B /data:/mnt radio_transients_gpu.sif your_heimdall.py -f /mnt/data.fil` 
 will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
 
-All the Python scripts are installed in a Conda enviroment `RT`, this envimoment is automatically loaded.
+All the Python scripts are installed in a Conda environment `RT`, this environment is automatically loaded.
+
+You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`
 
 ### shub
 These are built on commit by Singularity Hub at: https://singularity-hub.org/collections/5231
 They where last built on 15-May-2021
 
-### Improvments
-If you come accross bug or have suggestions for improvments, let me know or submit a pull request.
+### Improvements
+If you come accross bug or have suggestions for improvements, let me know or submit a pull request.
 
 ### Thanks
 To Kshitij Aggarwal for bug reports and suggestions.

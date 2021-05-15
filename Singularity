@@ -6,7 +6,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 %post
     apt-get update # update and install packages we need for the build
     apt-get -y install autoconf build-essential cmake csh git htop libboost-all-dev libtool libtool-bin python2.7 software-properties-common wget
-    # need these to build pacakges
+    # need these to build packages
 
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
     apt-get -y install pgplot5
@@ -108,7 +108,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
-    conda activate PE # But PRESTO in its own env, so FETCH doen't cause problems
+    conda activate PE # But PRESTO in its own env, so FETCH doesn't cause problems
     cd /usr/local/
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich
     git clone https://github.com/scottransom/presto.git
@@ -122,7 +122,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make clean
     cd $PRESTO
     pip install numpy
-    #/usr/bin/pip3 install numpy # not in requiments file
+    #/usr/bin/pip3 install numpy # not in requirements file
     #conda install -y numpy
     sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
     pip install .
@@ -163,7 +163,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     echo "pysigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf pysigproc
 
-    echo "Installing rficlean"
+    echo "Installing RFIClean"
     cd ~
     # git clone https://github.com/josephwkania/RFIClean.git
     git clone https://github.com/ymaan4/RFIClean.git
@@ -178,7 +178,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
     echo "Installing riptide"
     pip install riptide-ffa
-    echo "riptide-ffa installed from pip latest"
+    echo "riptide-ffa installed from pip"
 
     echo "Installing sigproc"
     cd ~
@@ -288,4 +288,3 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     Author Joseph W Kania
     Version v0.0.4
     Build-date 15-May-2021
-
