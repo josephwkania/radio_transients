@@ -97,6 +97,7 @@ All the Python scripts are installed in a Conda enviroment `RT`, this envimoment
 
 ### shub
 These are built on commit by Singularity Hub at: https://singularity-hub.org/collections/5231
+They where last built on 15-May-2021
 
 ### Improvments
 If you come accross bug or have suggestions for improvments, let me know or submit a pull request.

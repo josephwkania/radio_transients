@@ -46,7 +46,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make INSTALL_DIR=$HOME/software/dedisp install
     cp ~/software/dedisp/lib/* /usr/local/lib
     export LD_LIBRARY_PATH=LD_LIBRARY_PATH:~/software/dedisp
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "dedisp Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Building Psrdada"
     cd ~/source
@@ -60,7 +60,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     cp -r ~/software/psrdada/bin/* /usr/local/bin
     cp -r ~/software/psrdada/lib/* /usr/local/lib
     cp -r ~/software/psrdada/include/* /usr/include
-    echo "built psrdada at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "psrdada Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     export PATH=$PATH:/usr/local/cuda
     echo "Building Heimdall"
@@ -74,7 +74,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     # sed -n 92p Pipeline/Makefile check if line is changed
     make install
     mv ~/software/heimdall/linux_64/bin/* /usr/local/bin
-    echo "built Heimdall at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Heimdall Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     # rm /usr/bin/python # don't need python linked after heimdall is built
     rm -rf software source # clean up after heimdall build
@@ -88,11 +88,12 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
-    echo "Built iqrm_apollo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "iqrm_apollo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf iqrm_apollo
 
     echo "Installing juyterlab"
     conda install -y -c conda-forge jupyterlab
+    echo "Jupiterlab Built from conda" >> "$SINGULARITY_LABELS"
 
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
@@ -104,7 +105,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make
     make install
     export TEMPO=$PWD # Presto need to know this
-    echo "Built Tempo at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
     conda activate PE # But PRESTO in its own env, so FETCH doen't cause problems
@@ -127,7 +128,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     pip install .
     mv $PRESTO/bin/* /usr/local/bin
     conda activate RT
-    echo "Built PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
@@ -138,7 +139,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     tcsh makeit
     mv psrcat /usr/local/bin
     mv *.db /usr/local
-    echo "Built psrcat"
+    echo "psrcat no version control" >> "$SINGULARITY_LABELS"" 
     cd ~ && rm -rf psrcat_tar
 
     echo "Installing psrdada-python"
@@ -151,7 +152,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     sed -i "51 a INCLUDE_DIRS.append('/usr/include')" setup.py
     make
     make install
-    echo "built psrdada-python at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "psrdada-python Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf psrdada-python
 
     echo "Installing pysigproc"
@@ -159,7 +160,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://github.com/devanshkv/pysigproc.git
     cd pysigproc
     pip install .
-    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "pysigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf pysigproc
 
     echo "Installing rficlean"
@@ -172,11 +173,12 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     make install
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
-    echo "Built RFICLean at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "RFICLean Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf RFIClean
 
     echo "Installing riptide"
     pip install riptide-ffa
+    echo "riptide-ffa installed from pip latest"
 
     echo "Installing sigproc"
     cd ~
@@ -186,7 +188,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     ./configure --prefix=/usr/local/
     make
     make install
-    echo "Built sigproc at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "sigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf sigproc
 
     echo "Installing YAPP"
@@ -200,7 +202,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     cd yapp
     make HDF5=yes
     make install
-    echo "Built YAPP at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "YAPP Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf yapp
 
     echo "Installing your"
@@ -208,7 +210,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://github.com/thepetabyteproject/your.git
     cd your
     pip install .
-    echo "Built your at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "your Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf your
 
     echo "Building FETCH"
@@ -217,7 +219,7 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     pip install .
-    echo "built dedisp at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"
+    echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
 
     #apt-get -y purge autoconf build-essential cmake git python2.7 wget # remove build time dependencies
@@ -284,6 +286,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
 
 %labels
     Author Joseph W Kania
-    Version v0.0.3
-
+    Version v0.0.4
+    Build-date 15-May-2021
 
