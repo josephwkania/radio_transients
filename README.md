@@ -99,7 +99,7 @@ You can see the commits and corresponding dates by running `singularity inspect 
 
 ### shub
 These are built on commit by Singularity Hub at: https://singularity-hub.org/collections/5231
-They where last built on 15-May-2021
+They where last built on 06-Jun-2021
 
 ### Improvements
 If you come accross bug or have suggestions for improvements, let me know or submit a pull request.
