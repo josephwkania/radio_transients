@@ -5,7 +5,7 @@
 [![Forks](https://img.shields.io/github/forks/josephwkania/radio_transients?style=flat-square)]()
 [![Stars](https://img.shields.io/github/stars/josephwkania/radio_transients?style=flat-square)]()
 [![License](https://img.shields.io/github/license/josephwkania/radio_transients?style=flat-square)]()
-[![https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg](https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg)](https://singularity-hub.org/collections/5231)
+[![Sylabs](https://img.shields.io/badge/Hosted-Sylabs-Green.svg)](https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients)
 
 
 ## Overview
@@ -36,7 +36,7 @@ Contains everything (CPU+GPU)
     your           https://github.com/thepetabyteproject/your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients`
+`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:latest`
 
 *One of FETCH's dependencies causes PRESTO's Python scripts to fail. 
 This necessitated putting them in different environments. 
@@ -62,8 +62,9 @@ Contains CPU based programs
     your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients:cpu`  
-There is an arm version `Singularity.arm`, you can build yourself.
+`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:cpu`  
+There is an arm version `Singularity.arm`,
+`singularity pull --arch arm library://josephwkania/radio_transients/radio_transients:arm`
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -79,7 +80,7 @@ Contains gpu based programs
     your
 
 Get with
-`singularity pull shub://josephwkania/radio_transients:gpu`
+`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:gpu`
 
 ### How to use
 Your `$HOME` automatically gets mounted.
@@ -97,12 +98,22 @@ All the Python scripts are installed in a Conda environment `RT`, this environme
 
 You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`
 
-### shub
-These are built on commit by Singularity Hub at: https://singularity-hub.org/collections/5231
+### Sylabs Cloud
+These are built on a E5 v3 family machine and uploaded to Sylabs Cloud at 
+https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients
 They where last built on 06-Jun-2021
 
+If your processor your processor is significantly older than this, you may run into problems with 
+the older processor not having the whole instruction set needed. In this case, you should build
+use singularity to build the image locally. 
+
+An archival version of these (built 25-April-2021) are on Singularity Hub at: 
+https://singularity-hub.org/collections/5231
+[![https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg](https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg)](https://singularity-hub.org/collections/5231)
+
+
 ### Improvements
-If you come accross bug or have suggestions for improvements, let me know or submit a pull request.
+If you come across bug or have suggestions for improvements, let me know or submit a pull request.
 
 ### Thanks
 To Kshitij Aggarwal for bug reports and suggestions.
