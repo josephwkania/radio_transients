@@ -80,7 +80,6 @@ From:  nvidia/cuda:10.2-devel # Needed for fetch
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
     mkdir build; cd build
-    git checkout 4b8847ecd702eed582e1d28411e96a6d650a432f # This is the last commit I can get to make
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
