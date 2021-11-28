@@ -101,7 +101,7 @@ You can see the commits and corresponding dates by running `singularity inspect 
 ### Sylabs Cloud
 These are built on a E5 v3 family machine and uploaded to Sylabs Cloud at 
 https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients
-They where last built on 15-Sep-2021
+They where last built on 27-Nov-2021
 
 If your processor your processor is significantly older than this, you may run into problems with 
 the older processor not having the whole instruction set needed. In this case, you should build
