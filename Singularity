@@ -22,8 +22,10 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     rm ~/miniconda.sh
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
-    conda create -y --name RT python=3.8
-    conda create -y --name PE python=3.8
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    conda create -y --name RT python=3.10
+    # conda create -y --name PE python=3.9
     conda activate RT
         
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
@@ -53,6 +55,7 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     echo "Building Psrdada"
     cd ~/source
     export CFLAGS="-fopenmp -fPIC"
+    # conda install "cython<3.0"
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
     ./bootstrap
@@ -105,35 +108,31 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
-    conda activate PE # But PRESTO in its own env, so FETCH doesn't cause problems
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
+    conda install meson meson-python ninja
     cd /usr/local/
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
-    cd $PRESTO/src # links libsla, thanks https://github.com/scottransom/presto/issues/1#issuecomment-60413231
-    make prep
-    make
-    make mpi
-    make clean
-    cd $PRESTO
-    pip install numpy
-    #/usr/bin/pip3 install numpy # not in requirements file
-    #conda install -y numpy
-    sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
-    pip install .
-    mv $PRESTO/bin/* /usr/local/bin
-    conda activate RT
+    meson setup build --prefix=$CONDA_PREFIX
+    export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    export LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LIBRARY_PATH
+    python check_meson_build.py
+    meson compile -C build
+    meson install -C build
+    cd python
+    pip install --config-settings=builddir=build .
+    cd ../
+    # ./build/src/makewisdom # Machine specific, commented out for general builds
+    # mv fftw_wisdom.txt $PRESTO/lib/
     echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
-    apt-get -y install tcsh
     wget https://www.atnf.csiro.au/people/pulsar/psrcat/downloads/psrcat_pkg.tar.gz
     tar xf psrcat_pkg.tar.gz
     cd psrcat_tar
-    tcsh makeit
+    make psrcat
     mv psrcat /usr/local/bin
     mv *.db /usr/local
     echo "psrcat no version control" >> "$SINGULARITY_LABELS"
@@ -143,6 +142,7 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~
     git clone https://github.com/TRASAL/psrdada-python.git
     cd psrdada-python
+    pip install "cython<3.0"
     pip install -r requirements.txt
     # add lib and include paths to setup.py
     sed -i "51 a LIBRARY_DIRS.append('/usr/local/lib')" setup.py
@@ -214,7 +214,9 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~
     git clone https://github.com/josephwkania/jess.git
     cd jess
-    pip install .[cupy]
+    v=$( { nvcc --version || nvidia-smi; } 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+|release \K[0-9]+' | head -1)
+    pip install "cupy-cuda${v}x" # Explicitly get the the correct CuPy
+    pip install . #[cupy]
     echo "jess Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf jess
 
@@ -227,17 +229,17 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~ && rm -rf will
 
     echo "Installing FETCH"
-    conda install -y -c anaconda "tensorflow-gpu>=2.0,<=2.6"
-    # https://stackoverflow.com/a/68601733 use 1.3.0 until this is fixed
-    conda install -y -c anaconda keras pandas==1.3.0 scipy numpy
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
+    # pip install -r requirements.txt
+    pip install tensorflow[and-cuda]==2.14 # 2.14 is the last to work with cuda-11.8
     pip install .
     echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
+    pip install "numpy<2" # We need numpy<2 for Fetch to work
 
-    #apt-get -y purge autoconf build-essential cmake git wget # remove build time dependencies
-    #apt-get -y autoremove
+    apt-get -y purge autoconf build-essential cmake git wget # remove build time dependencies
+    apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
     conda clean --all
 
@@ -261,11 +263,10 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/usr/local/tempo
     export PRESTO=/usr/local/presto
-    export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     export PSRCAT_FILE=/usr/local/psrcat.db
    
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs
-   
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript
@@ -278,7 +279,7 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     This container has software to search for radio transients.
 
     Contains the following programs:
-    CUDA 11.5
+    CUDA 11.8
     fetch          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
@@ -302,5 +303,5 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
 
 %labels
     Author Joseph W Kania
-    Version v0.1.0
-    Build-date 27-Nov-2021
+    Version v0.2.1
+    Build-date 04-Sep-2026

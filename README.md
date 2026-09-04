@@ -16,12 +16,13 @@ There are three containers
 ### radio_transients
 Contains everything (CPU+GPU)
  
-    CUDA 10.2
-    FETCH          https://github.com/devanshkv/fetch  -- In Conda environment `FE`
+    CUDA 11.8
+    FETCH          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
     htop           https://htop.dev/
     iqrm_apollo    https://gitlab.com/kmrajwade/iqrm_apollo
+    jess           https://github.com/josephwkania/jess
     jupyterlab     https://jupyter.org/
     PRESTO         https://www.cv.nrao.edu/~sransom/presto/
     psrdada        http://psrdada.sourceforge.net/
@@ -37,13 +38,6 @@ Contains everything (CPU+GPU)
 
 Get with
 `singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:latest`
-
-*One of FETCH's dependencies causes PRESTO's Python scripts to fail. 
-This necessitated putting them in different environments. 
-Everything except for PRESTO is in `RT`, which is loaded by default.
-PRESTO is in `PE`, in the shell you can activate this 
-with `conda activate PE`. If you need access outside the container,
-you should use radio_transients:cpu, which has PRESTO in the default environment. 
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -69,8 +63,9 @@ There is an arm version `Singularity.arm`,
 ### radio_transients_gpu
 Contains gpu based programs
 
-    CUDA 10.2
-    FETCH      
+    CUDA 11.8
+    FETCH
+    jess
     jupyterlab
     heimdall
     - dedisp

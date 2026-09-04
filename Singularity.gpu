@@ -14,7 +14,9 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     rm ~/miniconda.sh
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
-    conda create -y --name RT python=3.8
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    conda create -y --name RT python=3.10 # last compatible with tensorflow==2.14
     conda activate RT
 
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
@@ -23,11 +25,10 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     echo "conda activate RT" >> /.singularity_bash    
     
     echo "Installing FETCH"
-    conda install -y -c anaconda "tensorflow-gpu>=2.0,<=2.6"
-    # https://stackoverflow.com/a/68601733 use 1.3.0 until this is fixed
-    conda install -y -c anaconda keras pandas==1.3.0 scipy numpy
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
+    # pip install -r requirements.txt
+    pip install tensorflow[and-cuda]==2.14 # 2.14 is the last to work with cuda-11.8
     pip install .
     echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
@@ -88,6 +89,7 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~
     git clone https://github.com/TRASAL/psrdada-python.git
     cd psrdada-python
+    pip install "cython<3.0"
     pip install -r requirements.txt
     # add lib and include paths to setup.py
     sed -i "51 a LIBRARY_DIRS.append('/usr/local/lib')" setup.py
@@ -97,6 +99,7 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     echo "psrdada-python Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf psrdada-python
 
+    apt-get -y install libx11-6 # needed for Python GUIs
     echo "Installing your"
     cd ~
     git clone https://github.com/thepetabyteproject/your.git
@@ -109,9 +112,12 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~
     git clone https://github.com/josephwkania/jess.git
     cd jess
-    pip install .[cupy]
+    v=$( { nvcc --version || nvidia-smi; } 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+|release \K[0-9]+' | head -1)
+    pip install "cupy-cuda${v}x" # Explicitly get the the correct CuPy
+    pip install . #[cupy]
     echo "jess Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf jess
+    pip install "numpy<2" # We need numpy<2 for Fetch to work
 
     apt-get -y purge autoconf build-essential git wget # remove build time dependencies
     apt-get -y autoremove 
@@ -149,7 +155,7 @@ This container is for running your_heimdall on dada buffers for search for singl
 These pulses can be classified with FETCH. 
 
     Contains:
-    CUDA 11.5
+    CUDA 11.8
     fetch          https://github.com/devanshkv/fetch
     jess           https://github.com/josephwkania/jess
     jupyterlab     https://jupyter.org
@@ -163,5 +169,5 @@ These pulses can be classified with FETCH.
 
 %labels
     Author Joseph W Kania 
-    Version v0.1.0
-    Build-date 27-Nov-2021
+    Version v0.2.1
+    Build-date 04-Sep-2026
