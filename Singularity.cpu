@@ -22,7 +22,9 @@ From: ubuntu:20.04
     rm ~/miniconda.sh
     eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
     conda init
-    conda create -y --name RT python=3.8
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    conda create -y --name RT python=3.10
     conda activate RT 
  
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
@@ -62,32 +64,31 @@ From: ubuntu:20.04
     echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
-    # mkdir /usr/local/
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
+    conda install meson meson-python ninja
     cd /usr/local/
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
-    cd $PRESTO/src # links libsla, thanks https://github.com/scottransom/presto/issues/1#issuecomment-60413231
-    make prep
-    make
-    make mpi
-    make clean
-    cd $PRESTO
-    # pip install  numpy # installed at top
-    sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
-    pip install .
-    cp $PRESTO/bin/* /usr/local/bin
-    echo "PRESTO at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
+    meson setup build --prefix=$CONDA_PREFIX
+    export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    export LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LIBRARY_PATH
+    python check_meson_build.py
+    meson compile -C build
+    meson install -C build
+    cd python
+    pip install --config-settings=builddir=build .
+    cd ../
+    # ./build/src/makewisdom # Machine specific, commented out for general builds
+    # mv fftw_wisdom.txt $PRESTO/lib/
+    echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
-    apt-get -y install tcsh
     wget https://www.atnf.csiro.au/people/pulsar/psrcat/downloads/psrcat_pkg.tar.gz
     tar xf psrcat_pkg.tar.gz 
     cd psrcat_tar
-    tcsh makeit
+    make psrcat
     mv psrcat /usr/local/bin
     mv *.db /usr/local
     echo "psrcat no version control" >> "$SINGULARITY_LABELS"
@@ -193,7 +194,7 @@ From: ubuntu:20.04
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/usr/local/tempo
     export PRESTO=/usr/local/presto
-    export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     export PSRCAT_FILE=/usr/local/psrcat.db
 
 
@@ -217,12 +218,12 @@ From: ubuntu:20.04
     sigproc       https://github.com/SixByNine/sigproc
     Tempo         http://tempo.sourceforge.net/
     RFIClean      https://github.com/ymaan4/RFIClean
-    will           https://github.com/josephwkania/will
+    will          https://github.com/josephwkania/will
     YAPP          https://github.com/jayanthc/yapp
     your          https://github.com/thepetabyteproject/your
 
 
 %labels
     Author Joseph W Kania
-    Version v0.1.0
-    Build-date 27-Nov-2021
+    Version v0.2.1
+    Build-date 04-Sep-2026
