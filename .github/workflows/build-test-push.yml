@@ -121,10 +121,38 @@ jobs:
           docker-images: true
           swap-storage: true
 
+      # eWaterCycle/setup-apptainer always fetches apptainer's amd64 .deb --
+      # apptainer publishes no arm64 packages at all -- so it can't work on
+      # the Graviton runner. Use it on x86_64 and build from source on arm64.
       - name: Install Apptainer
+        if: matrix.runner != 'ubuntu-24.04-arm'
         uses: eWaterCycle/setup-apptainer@v2
         with:
           apptainer-version: 1.3.6
+
+      - name: Install Apptainer build dependencies (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libseccomp-dev pkg-config \
+            uidmap squashfs-tools fakeroot cryptsetup tzdata git
+
+      - name: Set up Go (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build Apptainer from source (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: |
+          git clone --depth 1 --branch v1.3.6 https://github.com/apptainer/apptainer.git /tmp/apptainer-src
+          cd /tmp/apptainer-src
+          ./mconfig
+          make -C builddir -j"$(nproc)"
+          sudo make -C builddir install
+          apptainer --version
 
       # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor, so
       # `--fakeroot` is unreliable on these runners. sudo always works, and
