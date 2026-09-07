@@ -11,7 +11,7 @@
 ## Overview
 
 These are my Singularity Recipes for common radio transient software.
-There are three containers
+There are four containers
 
 ### radio_transients
 Contains everything (CPU+GPU)
@@ -56,9 +56,14 @@ Contains CPU based programs
     your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:cpu`  
-There is an arm version `Singularity.arm`,
-`singularity pull --arch arm library://josephwkania/radio_transients/radio_transients:arm`
+`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:cpu`
+
+### radio_transients arm
+The CPU container built for arm64 (aarch64), from `Singularity.arm`. Same
+programs as `radio_transients_cpu`.
+
+Get with
+`singularity pull --arch arm64 library://josephwkania/radio_transients/radio_transients:arm`
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -92,6 +97,70 @@ will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py with
 All the Python scripts are installed in a Conda environment `RT`, this environment is automatically loaded.
 
 You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`
+
+### Testing
+
+Each recipe has a test suite in `tests/`, written to run inside the built
+image. There are two, split by what they need:
+
+`container_test.sh` needs **no GPU**, so it runs on an ordinary CI runner. It
+checks that the binaries exist, that their shared libraries resolve, that they
+start, that every Python module imports, that the pinned versions the recipes
+depend on are the ones actually installed, and that a real filterbank makes it
+through a `fake` -> `rfifind` -> `prepdata` -> `realfft` ->
+`single_pulse_search.py` pipeline.
+
+```sh
+singularity exec -B "$PWD/tests:/tests" radio_transients.sif \
+    bash /tests/container_test.sh --variant full
+```
+
+`gpu_test.sh` needs an NVIDIA GPU. It runs every CUDA code path against a CPU
+reference and requires them to agree, then injects pulses at a known DM into a
+synthetic filterbank and asserts Heimdall recovers them at that DM.
+
+```sh
+singularity exec --nv -B "$PWD/tests:/tests" radio_transients_gpu.sif \
+    bash /tests/gpu_test.sh --dm 100
+```
+
+The variant is auto-detected if you leave `--variant` off. `--quick` skips the
+slow parts, `--keep` leaves the scratch directory for inspection, and
+`--list` / `--only NAME` on `gpu_numerics.py` run a subset of the GPU checks.
+Output is TAP 13, and the exit status is 0 only when every non-skipped
+assertion passed -- so the suites can gate a build.
+
+Results from a full rebuild of all four variants (7-Sep-2026, Tesla T4):
+
+| Variant | Image | `container_test.sh` | `gpu_test.sh` |
+|---|---|---|---|
+| radio_transients      | 11 G  | 151 passed, 0 failed, 18 skipped | 18 / 0 / 0 |
+| radio_transients_gpu  | 9.6 G | 50 / 0 / 4                        | 18 / 0 / 0 |
+| radio_transients_cpu  | 1.5 G | 113 / 0 / 18                      | n/a |
+| arm (aarch64)         | 1.2 G | 111 / 0 / 20                      | n/a |
+
+Skips are expected: a variant is not asked for tools it does not ship, and the
+GPU-less suite skips assertions that need real hardware. The arm figures above
+come from a qemu-emulated build on an x86 host; CI builds that variant
+natively on an ARM runner.
+
+`tests/README.md` explains what each layer catches and why, including the
+checks that exist specifically to catch a passing-but-wrong result -- such as
+the negative control that fails a dedisperser which ignores its DM argument.
+
+### Continuous integration
+
+`.github/workflows/build-test-push.yml` builds all four variants on every push
+that touches a recipe or the tests, runs `container_test.sh` against each, and
+pushes to GHCR only if the tests pass -- an image that fails is never tagged.
+It also rebuilds weekly, so upstream breakage surfaces on a Monday rather than
+the morning someone needs the container. `gpu-test.yml` runs the GPU suite on a
+self-hosted runner with a real card.
+
+A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
+The linter configs live in `tests/.flake8` and `tests/.pylintrc`, and CI passes
+no flags of its own, so running the tools by hand gives the same answer CI
+does.
 
 ### Sylabs Cloud
 These are built on a E5 v3 family machine and uploaded to Sylabs Cloud at 
