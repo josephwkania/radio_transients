@@ -166,7 +166,20 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     git clone https://github.com/ymaan4/RFIClean.git
     cd RFIClean
     mkdir -p /home/maan/pulsar_softwares/bin
-    make
+    # RFIClean defines its sigproc globals in a header without `extern`, which
+    # only links because GCC defaults to -fcommon. GCC 10 onwards defaults to
+    # -fno-common and the link fails with "multiple definition of". This base
+    # still ships GCC 9, so the flag is a no-op today and guards the recipe
+    # against a future base bump. Overriding CFLAGS replaces the Makefile's
+    # value, so its other flags have to be repeated.
+    #
+    # -march=native is deliberately downgraded to -mtune=native. -march lets the
+    # compiler emit whatever the build machine supports: on a Cascade Lake runner
+    # that meant AVX2 and FMA, so the binary SIGILLs on any pre-Haswell CPU, and
+    # the floor silently changes with whichever runner CI happens to draw.
+    # -mtune keeps the scheduling tuning, which costs nothing elsewhere, without
+    # restricting the instruction set.
+    make CFLAGS="-Iinclude -Wno-unused-result -O3 -mtune=native -fcommon"
     make install
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
@@ -238,10 +251,28 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     cd ~ && rm -rf fetch
     pip install "numpy<2" # We need numpy<2 for Fetch to work
 
+    # iqrm_apollo_cli links Boost at runtime. The purge below drops
+    # libboost-all-dev and the autoremove then takes the runtime libraries with
+    # it, leaving iqrm_apollo_cli unable to start at all. Mark the runtime
+    # packages manual so autoremove has to leave them alone.
+    apt-mark manual $(dpkg-query -W -f='${Package} ${Status}\n' 'libboost*' 2>/dev/null \
+        | awk '/ install ok installed$/ && $1 ~ /[0-9]$/ {print $1}') || true
+
     apt-get -y purge autoconf build-essential cmake git wget # remove build time dependencies
     apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own
     conda clean --all
+
+    # tensorflow[and-cuda] ships libNVVM and libdevice inside the
+    # nvidia-cuda-nvcc-cu11 wheel, but the apt purge above removes
+    # /usr/local/cuda/nvvm along with cuda-nvcc. numba -- which is how `your`
+    # and FETCH's candmaker reach the GPU -- looks for NVVM under CUDA_HOME or
+    # /usr/local/cuda, finds nothing, and every GPU path in `your` fails while
+    # every CPU test still passes. Point the canonical location at the wheel.
+    NVVM_WHEEL=$(readlink -f "$(ls -d /usr/local/miniconda/envs/RT/lib/python3*/site-packages/nvidia/cuda_nvcc/nvvm 2>/dev/null | head -1)")
+    if [ -n "$NVVM_WHEEL" ] && [ ! -e /usr/local/cuda/nvvm ]; then
+        ln -s "$NVVM_WHEEL" /usr/local/cuda/nvvm
+    fi
 
     echo "Done building"
 
@@ -267,6 +298,8 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
     export PSRCAT_FILE=/usr/local/psrcat.db
    
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs
+    export CUDA_HOME=/usr/local/cuda # override a CUDA_HOME inherited from the host
+    export LD_LIBRARY_PATH=/usr/local/cuda/nvvm/lib64:$LD_LIBRARY_PATH # libNVVM for numba, see %post
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript

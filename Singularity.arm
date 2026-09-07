@@ -1,5 +1,5 @@
 BootStrap: docker
-From: arm32v7/ubuntu
+From: arm64v8/ubuntu:22.04
 
 
 %post
@@ -61,32 +61,42 @@ From: arm32v7/ubuntu
     echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
-    # mkdir /usr/local/
     cd /usr/local/
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich 
+    # PRESTO's `make prep && make` path needs erfa.h and offers no fallback, so
+    # it stopped building once upstream moved to meson. meson pulls erfa in as a
+    # subproject when the system has none. Singularity.cpu already made this
+    # switch; this is the same change, adapted for the system python this recipe
+    # uses in place of the conda env the cpu recipe has.
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
+    pip3 install meson meson-python ninja
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib
-    cd $PRESTO/src # links libsla, thanks https://github.com/scottransom/presto/issues/1#issuecomment-60413231
-    make prep
-    make
-    make mpi
-    make clean
-    cd $PRESTO
-    apt-get -y install python3-future python3-six python3-scipy python3-matplotlib python3-astropy 
-    sed -i '' $PRESTO/python/presto/waterfaller.py # removes symbolic link (which upsets pip) https://stackoverflow.com/a/12673543
-    pip3 install .
-    cp $PRESTO/bin/* /usr/local/bin
+    apt-get -y install python3-future python3-six python3-scipy python3-matplotlib python3-astropy
+    meson setup build --prefix=/usr/local
+    # meson installs libraries to $prefix/lib/<triplet>, and check_meson_build.py
+    # refuses to proceed unless that directory is on LIBRARY_PATH. Derive the
+    # triplet rather than hardcoding it, so this works on every architecture.
+    TRIPLET=$(gcc -dumpmachine)
+    export LIBRARY_PATH=/usr/local/lib/$TRIPLET:$LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/lib/$TRIPLET:$LD_LIBRARY_PATH
+    python3 check_meson_build.py
+    meson compile -C build
+    meson install -C build
+    ldconfig   # /usr/local/lib/<triplet> is in ld.so.conf.d but needs the refresh
+    cd python
+    pip3 install --config-settings=builddir=build .
+    cd "$PRESTO"
     echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
-    apt-get -y install tcsh
     wget https://www.atnf.csiro.au/people/pulsar/psrcat/downloads/psrcat_pkg.tar.gz
     tar xf psrcat_pkg.tar.gz 
     cd psrcat_tar
-    tcsh makeit
+    # upstream replaced the csh `makeit` script with a Makefile; running the old
+    # one under tcsh now fails with "Illegal variable name". Same as the cpu recipe.
+    make psrcat
     mv psrcat /usr/local/bin
     mv *.db /usr/local
     echo "Built psrcat"
@@ -108,7 +118,16 @@ From: arm32v7/ubuntu
     git clone https://github.com/ymaan4/RFIClean.git 
     cd RFIClean
     mkdir -p /home/maan/pulsar_softwares/bin
-    make
+    # RFIClean declares its sigproc globals in a header without `extern`. GCC 9
+    # accepted that because -fcommon was the default; GCC 10 onwards defaults to
+    # -fno-common, so every translation unit emits its own definition and the
+    # link fails with "multiple definition of". This is a compiler-version
+    # issue, not an architecture one -- it appears on any base with GCC >= 10.
+    # Overriding CFLAGS replaces the Makefile's value, so -Iinclude has to be
+    # repeated or the compile cannot find the headers. -march=native is dropped
+    # deliberately: it bakes the build machine's ISA into the binary, which is
+    # wrong for a container meant to run on other hardware.
+    make CFLAGS="-Iinclude -Wno-unused-result -O3 -fcommon"
     make install
     mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
     rm -r /home/maan
@@ -137,7 +156,7 @@ From: arm32v7/ubuntu
     mkdir -p /usr/local/hdf5
     ln -s /usr/include/hdf5/serial /usr/local/hdf5/include
     mkdir -p /usr/local/hdf5
-    ln -s /usr/lib/arm-linux-gnueabihf/hdf5/serial/lib /usr/local/hdf5/lib # new location for arm-arch
+    ln -s /usr/lib/$(gcc -dumpmachine)/hdf5/serial/lib /usr/local/hdf5/lib # multiarch path, derived so it follows the base image's architecture
     git clone https://github.com/jayanthc/yapp.git
     cd yapp 
     make HDF5=yes
@@ -174,6 +193,17 @@ From: arm32v7/ubuntu
     #apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
 
+    # This recipe takes matplotlib/astropy/pandas/h5py/numba from apt, all built
+    # against numpy 1.21. Later pip installs pull numpy 2.x, which shadows the
+    # apt copy on sys.path and breaks every one of those extensions with
+    # "numpy.dtype size changed". Singularity and Singularity.gpu already pin
+    # this; the arm recipe never did.
+    # numba must be resolved together with numpy: apt ships numba 0.55, which
+    # only supports numpy <= 1.21 and dies with "initialization of _internal
+    # failed" against the 1.26 that "numpy<2" resolves to. 0.60 is the numba
+    # series built for this numpy range.
+    pip3 install "numpy<2" "numba>=0.59,<0.61"
+
     echo "Done building!"
 
 
@@ -204,7 +234,7 @@ From: arm32v7/ubuntu
 
 
 %help
-    This container has CPU w/arm arch software to search for radio transients.
+    This container has CPU w/arm64 (aarch64) software to search for radio transients.
         
     Contains the following programs:
     htop          https://htop.dev/

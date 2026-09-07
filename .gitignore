@@ -1,3 +1,5 @@
 *.simg
 *.sif
 *~
+__pycache__/
+*.pyc
