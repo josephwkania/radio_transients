@@ -1,0 +1,194 @@
+name: build, test, push
+
+# Builds each container variant, runs the GPU-less test suite against it, and
+# only then pushes to GHCR. A container that fails its tests is never tagged.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Singularity*'
+      - 'tests/**'
+      - '.github/workflows/build-test-push.yml'
+  pull_request:
+    paths:
+      - 'Singularity*'
+      - 'tests/**'
+  schedule:
+    # Weekly rebuild, so upstream breakage surfaces on a Monday rather than
+    # the morning someone needs the container.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Deliberately not a dependency of `build`: a formatting nit should not stand
+  # between a recipe change and a five hour container build. It runs alongside
+  # them and still turns the workflow red on its own.
+  lint:
+    name: lint tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Pinned: an unrelated pylint release adding a new check should not turn
+      # this red on a day nobody touched the suite. Bump deliberately.
+      - name: Install linters
+        run: |
+          pip install --no-cache-dir \
+            black==26.5.1 \
+            flake8==7.3.0 \
+            pylint==4.0.8 \
+            numpy
+
+      # Each tool reads its own config from tests/ -- no flags here, so what
+      # CI enforces is exactly what runs locally.
+      - name: black
+        run: black --check --diff tests/
+
+      - name: flake8
+        working-directory: tests
+        run: flake8 .
+
+      - name: pylint
+        working-directory: tests
+        run: pylint *.py
+
+      # The runner ships its own shellcheck, but the version drifts with the
+      # image. Pin it for the same reason the Python linters are pinned.
+      - name: Install shellcheck
+        run: |
+          curl -fsSL \
+            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
+            | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
+          shellcheck --version
+
+      - name: shellcheck
+        working-directory: tests
+        run: shellcheck *.sh
+
+  build:
+    name: ${{ matrix.variant }}
+    runs-on: ${{ matrix.runner }}
+    # The full CUDA build compiles PRESTO, heimdall, dedisp and psrdada from
+    # source; give it room before the 6 hour ceiling.
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            recipe: Singularity.cpu
+            runner: ubuntu-24.04
+          - variant: gpu
+            recipe: Singularity.gpu
+            runner: ubuntu-24.04
+          - variant: latest
+            recipe: Singularity
+            runner: ubuntu-24.04
+          # Singularity.arm now bootstraps from arm64v8/ubuntu, which matches
+          # the Graviton runner's own architecture, so it builds natively --
+          # no qemu, and no emulation penalty.
+          - variant: arm
+            recipe: Singularity.arm
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A CUDA devel base plus conda plus PRESTO will not fit in the ~14 GB
+      # a stock runner leaves free. This reclaims roughly 30 GB.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # eWaterCycle/setup-apptainer always fetches apptainer's amd64 .deb --
+      # apptainer publishes no arm64 packages at all -- so it can't work on
+      # the Graviton runner. Use it on x86_64 and build from source on arm64.
+      - name: Install Apptainer
+        if: matrix.runner != 'ubuntu-24.04-arm'
+        uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: 1.3.6
+
+      - name: Install Apptainer build dependencies (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libseccomp-dev pkg-config \
+            uidmap squashfs-tools fakeroot cryptsetup tzdata git
+
+      - name: Set up Go (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build Apptainer from source (arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: |
+          git clone --depth 1 --branch v1.3.6 https://github.com/apptainer/apptainer.git /tmp/apptainer-src
+          cd /tmp/apptainer-src
+          ./mconfig
+          make -C builddir -j"$(nproc)"
+          sudo make -C builddir install
+          apptainer --version
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor, so
+      # `--fakeroot` is unreliable on these runners. sudo always works, and
+      # the runner is disposable anyway.
+      - name: Build ${{ matrix.recipe }}
+        run: |
+          sudo apptainer build \
+            radio_transients_${{ matrix.variant }}.sif \
+            ${{ matrix.recipe }}
+          sudo chown "$USER" radio_transients_${{ matrix.variant }}.sif
+
+      - name: Report image size
+        run: ls -lh radio_transients_${{ matrix.variant }}.sif
+
+      # The runner has no GPU, which is exactly what the suite is written for.
+      - name: Test
+        run: |
+          apptainer exec \
+            --bind "$PWD/tests:/tests" \
+            radio_transients_${{ matrix.variant }}.sif \
+            bash /tests/container_test.sh \
+              --variant ${{ matrix.variant == 'latest' && 'full' || matrix.variant }} \
+            | tee test-results-${{ matrix.variant }}.tap
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tap-${{ matrix.variant }}
+          path: test-results-${{ matrix.variant }}.tap
+
+      # Only reached when the tests passed, and never on a pull request.
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | apptainer registry login \
+            --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
+          apptainer push radio_transients_${{ matrix.variant }}.sif \
+            oras://${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.variant }}

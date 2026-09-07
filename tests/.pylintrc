@@ -1,0 +1,41 @@
+# pylint configuration for the container test suite.
+#
+# These are test scripts that run *inside* the Singularity images, against
+# libraries that only exist there. Several of pylint's defaults are wrong for
+# that setting, so the disables below are deliberate design decisions rather
+# than suppressed warnings -- each one is explained.
+
+[MAIN]
+extension-pkg-allow-list = cupy, cupy_backends, numba
+
+# These modules live only inside the container images, so pylint running on
+# the host cannot import them and would otherwise report import-error and
+# c-extension-no-member for every use.
+ignored-modules = tensorflow, cupy, cupy_backends, jess, your, numba
+
+[MESSAGES CONTROL]
+disable =
+    # Each check imports its own dependencies on purpose: a missing library
+    # then fails that one check instead of aborting the module before any
+    # check has had a chance to run.
+    import-outside-toplevel,
+
+    # The check registry catches BaseException deliberately -- some of these
+    # libraries raise SystemExit rather than a normal exception.
+    broad-exception-caught,
+
+    # imports.py and gpu_numerics.py repeat the traceback-formatting block on
+    # purpose: both must run standalone inside a container, with no shared
+    # module available on sys.path.
+    duplicate-code,
+
+    # Test scripts, not a library: the check docstrings that matter are on the
+    # checks themselves, and argument counts mirror the filterbank header
+    # fields they carry.
+    missing-function-docstring,
+    missing-class-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    use-dict-literal

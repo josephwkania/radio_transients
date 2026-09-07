@@ -1,0 +1,92 @@
+name: gpu test
+
+# The numerical half of the test suite. Runs on a self-hosted machine with an
+# NVIDIA GPU, against the image that build-test-push.yml already published, so
+# this workflow never rebuilds anything -- it only answers "does the container
+# we just shipped compute the right numbers".
+#
+# Deliberately not triggered by `pull_request`: a self-hosted runner will
+# happily execute code from a fork's pull request, which is a bad idea. Runs
+# on demand, on a schedule, and after a successful build of master.
+
+on:
+  workflow_run:
+    workflows: ["build, test, push"]
+    branches: [master]
+    types: [completed]
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Which variant to test'
+        type: choice
+        options: [gpu, latest]
+        default: gpu
+      dm:
+        description: 'DM to inject and search for'
+        default: '100'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  gpu-test:
+    # Skip when the upstream build failed -- there is nothing new to test.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    # Label your GPU box with both of these when registering the runner.
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 120
+
+    permissions:
+      contents: read
+      packages: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.variant)) || fromJSON('["gpu","latest"]') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the GPU we were given
+        run: nvidia-smi
+
+      - name: Pull the published image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | apptainer registry login \
+            --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
+          apptainer pull --force image.sif \
+            oras://${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.variant }}
+
+      # The GPU-less suite again, this time on a machine that has a GPU. Cheap,
+      # and it catches anything that depends on the host driver being present.
+      - name: Structural tests
+        run: |
+          apptainer exec --nv --bind "$PWD/tests:/tests" image.sif \
+            bash /tests/container_test.sh \
+              --variant ${{ matrix.variant == 'latest' && 'full' || matrix.variant }} \
+            | tee structural-${{ matrix.variant }}.tap
+
+      - name: Numerical GPU tests
+        run: |
+          apptainer exec --nv --bind "$PWD/tests:/tests" image.sif \
+            bash /tests/gpu_test.sh --dm ${{ inputs.dm || '100' }} \
+            | tee gpu-${{ matrix.variant }}.tap
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tap-gpu-${{ matrix.variant }}
+          path: '*.tap'
+
+      # A self-hosted runner keeps its working directory between jobs, and
+      # these images are multiple GB.
+      - name: Clean up
+        if: always()
+        run: rm -f image.sif
