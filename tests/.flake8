@@ -1,0 +1,7 @@
+[flake8]
+# 88 columns to match black, which formats these files. Black will not split
+# a long string literal, so anything still over the limit has to be broken by
+# hand -- keep it that way rather than widening this number.
+max-line-length = 88
+max-complexity = 12
+exclude = __pycache__
