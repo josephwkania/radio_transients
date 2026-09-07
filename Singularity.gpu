@@ -123,7 +123,18 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     apt-get -y autoremove 
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
     conda clean --all
-    
+
+    # tensorflow[and-cuda] ships libNVVM and libdevice inside the
+    # nvidia-cuda-nvcc-cu11 wheel, but the apt purge above removes
+    # /usr/local/cuda/nvvm along with cuda-nvcc. numba -- which is how `your`
+    # and FETCH's candmaker reach the GPU -- looks for NVVM under CUDA_HOME or
+    # /usr/local/cuda, finds nothing, and every GPU path in `your` fails while
+    # every CPU test still passes. Point the canonical location at the wheel.
+    NVVM_WHEEL=$(readlink -f "$(ls -d /usr/local/miniconda/envs/RT/lib/python3*/site-packages/nvidia/cuda_nvcc/nvvm 2>/dev/null | head -1)")
+    if [ -n "$NVVM_WHEEL" ] && [ ! -e /usr/local/cuda/nvvm ]; then
+        ln -s "$NVVM_WHEEL" /usr/local/cuda/nvvm
+    fi
+
     echo "Done building!" 
 
 %environment
@@ -141,6 +152,8 @@ From:  nvidia/cuda:11.8.0-devel-ubuntu20.04
     source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the container
 
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH # dedisp libs 
+    export CUDA_HOME=/usr/local/cuda # override a CUDA_HOME inherited from the host
+    export LD_LIBRARY_PATH=/usr/local/cuda/nvvm/lib64:$LD_LIBRARY_PATH # libNVVM for numba, see %post
   
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
