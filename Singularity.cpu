@@ -1,4 +1,4 @@
-BootStrap: library
+BootStrap: docker
 From: ubuntu:20.04
 
 
