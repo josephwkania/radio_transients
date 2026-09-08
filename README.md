@@ -153,14 +153,27 @@ the negative control that fails a dedisperser which ignores its DM argument.
 `.github/workflows/build-test-push.yml` builds all four variants on every push
 that touches a recipe or the tests, runs `container_test.sh` against each, and
 pushes to GHCR only if the tests pass -- an image that fails is never tagged.
-It also rebuilds weekly, so upstream breakage surfaces on a Monday rather than
-the morning someone needs the container. `gpu-test.yml` runs the GPU suite on a
-self-hosted runner with a real card.
+`gpu-test.yml` runs the GPU suite on a self-hosted runner with a real card.
 
 A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
 The linter configs live in `tests/.flake8` and `tests/.pylintrc`, and CI passes
 no flags of its own, so running the tools by hand gives the same answer CI
 does.
+
+#### Weekly rebuilds
+
+Both workflows also run Mondays: `build-test-push.yml` at 06:00 UTC,
+`gpu-test.yml` at 09:00 UTC against what it published. The recipes do not pin
+the repositories they clone, so this is what catches upstream breakage.
+
+The tags therefore move -- `:latest` today is not what you pulled last month,
+even if no recipe changed. `singularity inspect` reports the build date and
+commits. To pin a build, pull by digest instead of tag:
+
+    singularity pull rt.sif \
+        oras://ghcr.io/josephwkania/radio_transients@sha256:<digest>
+
+Digests are on the package page linked from the badge above.
 
 ### Sylabs Cloud (legacy)
 
