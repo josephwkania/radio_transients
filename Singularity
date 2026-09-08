@@ -274,6 +274,15 @@ From: nvidia/cuda:11.8.0-devel-ubuntu20.04
         ln -s "$NVVM_WHEEL" /usr/local/cuda/nvvm
     fi
 
+    # Nothing reads these after the build. pip's wheel cache is the big one --
+    # 3.2 GB here, and wheels are already compressed, so it costs full size in
+    # the image and on every pull.
+    rm -rf /root/.cache/pip
+    rm -rf /var/lib/apt/lists/*
+    rm -rf /usr/local/presto/.git /usr/local/presto/build /usr/local/presto/python/build
+    rm -rf /usr/local/tempo/.git
+    find /usr/local/tempo/src -name '*.o' -delete 2>/dev/null || true
+
     echo "Done building"
 
 
