@@ -204,6 +204,15 @@ From: arm64v8/ubuntu:22.04
     # series built for this numpy range.
     pip3 install "numpy<2" "numba>=0.59,<0.61"
 
+    # Nothing reads these after the build. pip's wheel cache is the big one --
+    # 206 MB here, and wheels are already compressed, so it costs full size in
+    # the image and on every pull.
+    rm -rf /root/.cache/pip
+    rm -rf /var/lib/apt/lists/*
+    rm -rf /usr/local/presto/.git /usr/local/presto/build /usr/local/presto/python/build
+    rm -rf /usr/local/tempo/.git
+    find /usr/local/tempo/src -name '*.o' -delete 2>/dev/null || true
+
     echo "Done building!"
 
 
