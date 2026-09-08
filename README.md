@@ -5,7 +5,7 @@
 [![Forks](https://img.shields.io/github/forks/josephwkania/radio_transients?style=flat-square)]()
 [![Stars](https://img.shields.io/github/stars/josephwkania/radio_transients?style=flat-square)]()
 [![License](https://img.shields.io/github/license/josephwkania/radio_transients?style=flat-square)]()
-[![Sylabs](https://img.shields.io/badge/Hosted-Sylabs-Green.svg)](https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients)
+[![GHCR](https://img.shields.io/badge/Hosted-GHCR-Blue.svg)](https://github.com/josephwkania/radio_transients/pkgs/container/radio_transients)
 
 
 ## Overview
@@ -37,7 +37,7 @@ Contains everything (CPU+GPU)
     your           https://github.com/thepetabyteproject/your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:latest`
+`singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest`
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -56,14 +56,14 @@ Contains CPU based programs
     your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:cpu`
+`singularity pull radio_transients_cpu.sif oras://ghcr.io/josephwkania/radio_transients:cpu`
 
 ### radio_transients arm
 The CPU container built for arm64 (aarch64), from `Singularity.arm`. Same
 programs as `radio_transients_cpu`.
 
 Get with
-`singularity pull --arch arm64 library://josephwkania/radio_transients/radio_transients:arm`
+`singularity pull radio_transients_arm.sif oras://ghcr.io/josephwkania/radio_transients:arm`
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -80,7 +80,7 @@ Contains gpu based programs
     your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:gpu`
+`singularity pull radio_transients_gpu.sif oras://ghcr.io/josephwkania/radio_transients:gpu`
 
 ### How to use
 Your `$HOME` automatically gets mounted.
@@ -153,16 +153,35 @@ the negative control that fails a dedisperser which ignores its DM argument.
 `.github/workflows/build-test-push.yml` builds all four variants on every push
 that touches a recipe or the tests, runs `container_test.sh` against each, and
 pushes to GHCR only if the tests pass -- an image that fails is never tagged.
-It also rebuilds weekly, so upstream breakage surfaces on a Monday rather than
-the morning someone needs the container. `gpu-test.yml` runs the GPU suite on a
-self-hosted runner with a real card.
+`gpu-test.yml` runs the GPU suite on a self-hosted runner with a real card.
 
 A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
 The linter configs live in `tests/.flake8` and `tests/.pylintrc`, and CI passes
 no flags of its own, so running the tools by hand gives the same answer CI
 does.
 
-### Sylabs Cloud
+#### Weekly rebuilds
+
+Both workflows also run Mondays: `build-test-push.yml` at 06:00 UTC,
+`gpu-test.yml` at 09:00 UTC against what it published. The recipes do not pin
+the repositories they clone, so this is what catches upstream breakage.
+
+The tags therefore move -- `:latest` today is not what you pulled last month,
+even if no recipe changed. `singularity inspect` reports the build date and
+commits. To pin a build, pull by digest instead of tag:
+
+    singularity pull rt.sif \
+        oras://ghcr.io/josephwkania/radio_transients@sha256:<digest>
+
+Digests are on the package page linked from the badge above.
+
+### Sylabs Cloud (legacy)
+
+**These images are no longer updated.** They were last built on 27-Nov-2021,
+so they predate the CUDA 11.8 / Ubuntu 22.04 rebuild, the meson PRESTO build,
+and the test suite. Pull from GHCR instead, using the commands above. The rest
+of this section is kept for reference.
+
 These are built on a E5 v3 family machine and uploaded to Sylabs Cloud at 
 https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients
 They where last built on 27-Nov-2021
