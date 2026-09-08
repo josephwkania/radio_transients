@@ -5,7 +5,7 @@
 [![Forks](https://img.shields.io/github/forks/josephwkania/radio_transients?style=flat-square)]()
 [![Stars](https://img.shields.io/github/stars/josephwkania/radio_transients?style=flat-square)]()
 [![License](https://img.shields.io/github/license/josephwkania/radio_transients?style=flat-square)]()
-[![Sylabs](https://img.shields.io/badge/Hosted-Sylabs-Green.svg)](https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients)
+[![GHCR](https://img.shields.io/badge/Hosted-GHCR-Blue.svg)](https://github.com/josephwkania/radio_transients/pkgs/container/radio_transients)
 
 
 ## Overview
@@ -37,7 +37,7 @@ Contains everything (CPU+GPU)
     your           https://github.com/thepetabyteproject/your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:latest`
+`singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest`
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -56,14 +56,14 @@ Contains CPU based programs
     your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:cpu`
+`singularity pull radio_transients_cpu.sif oras://ghcr.io/josephwkania/radio_transients:cpu`
 
 ### radio_transients arm
 The CPU container built for arm64 (aarch64), from `Singularity.arm`. Same
 programs as `radio_transients_cpu`.
 
 Get with
-`singularity pull --arch arm64 library://josephwkania/radio_transients/radio_transients:arm`
+`singularity pull radio_transients_arm.sif oras://ghcr.io/josephwkania/radio_transients:arm`
 
 ### radio_transients_gpu
 Contains gpu based programs
@@ -80,7 +80,7 @@ Contains gpu based programs
     your
 
 Get with
-`singularity pull --arch amd64 library://josephwkania/radio_transients/radio_transients:gpu`
+`singularity pull radio_transients_gpu.sif oras://ghcr.io/josephwkania/radio_transients:gpu`
 
 ### How to use
 Your `$HOME` automatically gets mounted.
@@ -162,7 +162,13 @@ The linter configs live in `tests/.flake8` and `tests/.pylintrc`, and CI passes
 no flags of its own, so running the tools by hand gives the same answer CI
 does.
 
-### Sylabs Cloud
+### Sylabs Cloud (legacy)
+
+**These images are no longer updated.** They were last built on 27-Nov-2021,
+so they predate the CUDA 11.8 / Ubuntu 22.04 rebuild, the meson PRESTO build,
+and the test suite. Pull from GHCR instead, using the commands above. The rest
+of this section is kept for reference.
+
 These are built on a E5 v3 family machine and uploaded to Sylabs Cloud at 
 https://cloud.sylabs.io/library/josephwkania/radio_transients/radio_transients
 They where last built on 27-Nov-2021
