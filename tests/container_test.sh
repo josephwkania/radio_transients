@@ -231,19 +231,11 @@ printf '# host GPU : %s\n' "$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-sm
 section "environment"
 # --------------------------------------------------------------------------
 
-# The arm recipe has its conda block commented out and uses the distribution's
-# own python instead, so there is no RT env to find there. Asserting one would
-# report a container that is behaving exactly as its recipe intends as broken.
-if [ "$VARIANT" = "arm" ]; then
-    skip "environment: \$CONDA_DEFAULT_ENV" "the arm variant uses system python, not conda"
-    skip "conda env RT is active"            "the arm variant uses system python, not conda"
+t_env CONDA_DEFAULT_ENV
+if [ "${CONDA_DEFAULT_ENV:-}" = "RT" ]; then
+    pass "conda env RT is active"
 else
-    t_env CONDA_DEFAULT_ENV
-    if [ "${CONDA_DEFAULT_ENV:-}" = "RT" ]; then
-        pass "conda env RT is active"
-    else
-        fail "conda env RT is active" "CONDA_DEFAULT_ENV=${CONDA_DEFAULT_ENV:-<unset>}"
-    fi
+    fail "conda env RT is active" "CONDA_DEFAULT_ENV=${CONDA_DEFAULT_ENV:-<unset>}"
 fi
 
 PYVER=$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
