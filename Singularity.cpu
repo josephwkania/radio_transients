@@ -1,5 +1,5 @@
 BootStrap: docker
-From: ubuntu:20.04
+From: ubuntu:22.04
 
 
 %post
@@ -181,9 +181,14 @@ From: ubuntu:20.04
     echo "will Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf will
 
-    # This wants to remove libboost, which we need
-    #apt-get -y purge cmake build-essential git wget # remove build time dependencies
-    #apt-get -y autoremove 
+    # autoremove would take the Boost runtime with it, leaving iqrm_apollo_cli
+    # unable to start. Mark the runtime packages manual first, as Singularity
+    # does, and the purge below is then safe.
+    apt-mark manual $(dpkg-query -W -f='${Package} ${Status}\n' 'libboost*' 2>/dev/null \
+        | awk '/ install ok installed$/ && $1 ~ /[0-9]$/ {print $1}') || true
+
+    apt-get -y purge cmake build-essential git wget # remove build time dependencies
+    apt-get -y autoremove
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
     conda clean --all
 

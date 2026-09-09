@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: nvidia/cuda:11.8.0-devel-ubuntu20.04
+From: nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 
 %post

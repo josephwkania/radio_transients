@@ -12,26 +12,31 @@ From: arm64v8/ubuntu:22.04
     apt-get -y install pgplot5 
     export PGPLOT_DIR=/usr/lib/pgplot5
 
-    apt-get -y install python3-numpy python-is-python3 python3-pip python3-scipy # use conda instead
+    # apt-get -y install python3-numpy python-is-python3 python3-pip python3-scipy # use conda instead
     apt-get -y install libfftw3-dev libfftw3-bin libcfitsio-dev # We need these packages for multiple programs
-    
+
     # use conda so everthing is compatiable with the cuda-10-2 container
-    #wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-armv7l.sh -O ~/miniconda.sh -q
-    #bash ~/miniconda.sh -b -p /usr/local/miniconda
-    #rm ~/miniconda.sh
-    # eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
-    # conda init
-    # conda create -y --name RT python=3.8
-    # conda activate RT 
- 
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O ~/miniconda.sh -q
+    bash ~/miniconda.sh -b -p /usr/local/miniconda
+    rm ~/miniconda.sh
+    eval "$(/usr/local/miniconda/bin/conda shell.bash hook)"
+    conda init
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    conda create -y --name RT python=3.10
+    conda activate RT
+
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
-    #echo "## Activate RT environment" >> /.singularity_bash
-    #echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
-    #echo "conda activate RT" >> /.singularity_bash
-    
+    echo "## Activate RT environment" >> /.singularity_bash
+    echo "source /usr/local/miniconda/etc/profile.d/conda.sh" >> /.singularity_bash
+    echo "conda activate RT" >> /.singularity_bash
+
+    pip install --no-cache-dir numpy # make sure pip numpy get installed to avoid presto python error
+
     echo "Installing iqrm_apollo"
     cd ~
     apt-get -y install libboost-all-dev
+    apt-get -y clean # boost-all-dev's archives are large; this disk only has ~25G free for the whole build
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
     mkdir build; cd build
@@ -39,13 +44,12 @@ From: arm64v8/ubuntu:22.04
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
     echo "iqrm_apollo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
-    cd ~ && rm -rf iqrm_apollo    
+    cd ~ && rm -rf iqrm_apollo
 
-    apt-get -y install libffi-dev # need this dependency for juyterlab
     echo "Installing juyterlab"
-    pip3 install --upgrade pip
-    pip3 install jupyterlab
-    echo "Jupiterlab Built from pip" >> "$SINGULARITY_LABELS"
+    conda install -y -c conda-forge jupyterlab
+    conda clean -y --all # conda-forge's jupyterlab pulls a large dependency tree into the package cache
+    echo "Jupiterlab Built from conda" >> "$SINGULARITY_LABELS"
 
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
@@ -65,27 +69,27 @@ From: arm64v8/ubuntu:22.04
     # PRESTO's `make prep && make` path needs erfa.h and offers no fallback, so
     # it stopped building once upstream moved to meson. meson pulls erfa in as a
     # subproject when the system has none. Singularity.cpu already made this
-    # switch; this is the same change, adapted for the system python this recipe
-    # uses in place of the conda env the cpu recipe has.
+    # switch; this is the same change, targeting the conda env this recipe now
+    # builds against instead of /usr/local.
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
-    pip3 install meson meson-python ninja
+    apt-get -y clean
+    conda install -y meson meson-python ninja
+    conda clean -y --all
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    apt-get -y install python3-future python3-six python3-scipy python3-matplotlib python3-astropy
-    meson setup build --prefix=/usr/local
+    meson setup build --prefix=$CONDA_PREFIX
     # meson installs libraries to $prefix/lib/<triplet>, and check_meson_build.py
     # refuses to proceed unless that directory is on LIBRARY_PATH. Derive the
     # triplet rather than hardcoding it, so this works on every architecture.
     TRIPLET=$(gcc -dumpmachine)
-    export LIBRARY_PATH=/usr/local/lib/$TRIPLET:$LIBRARY_PATH
-    export LD_LIBRARY_PATH=/usr/local/lib/$TRIPLET:$LD_LIBRARY_PATH
-    python3 check_meson_build.py
+    export LIBRARY_PATH=$CONDA_PREFIX/lib/$TRIPLET:$LIBRARY_PATH
+    export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/$TRIPLET:$LD_LIBRARY_PATH
+    python check_meson_build.py
     meson compile -C build
     meson install -C build
-    ldconfig   # /usr/local/lib/<triplet> is in ld.so.conf.d but needs the refresh
     cd python
-    pip3 install --config-settings=builddir=build .
+    pip install --no-cache-dir --config-settings=builddir=build .
     cd "$PRESTO"
     echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
@@ -105,10 +109,9 @@ From: arm64v8/ubuntu:22.04
     
     echo "Installing pysigproc"
     cd ~
-    apt-get -y install python3-h5py python3-numba python3-llvmlite python3-imageio python3-networkx
     git clone https://github.com/devanshkv/pysigproc.git
     cd pysigproc
-    pip3 install . 
+    pip install --no-cache-dir .
     echo "pysigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf pysigproc
 
@@ -135,8 +138,7 @@ From: arm64v8/ubuntu:22.04
     cd ~ && rm -rf RFIClean 
 
     echo "Installing riptide"
-    apt-get -y install python3-pandas
-    pip3 install riptide-ffa
+    pip install --no-cache-dir riptide-ffa
     echo "riptide-ffa installed from pip" >> "$SINGULARITY_LABELS"
  
     echo "Installing sigproc"
@@ -168,15 +170,15 @@ From: arm64v8/ubuntu:22.04
     cd ~
     git clone https://github.com/thepetabyteproject/your.git
     cd your
-    pip3 install .
+    pip install --no-cache-dir .
     echo "your built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
-    cd ~ && rm -rf your        
+    cd ~ && rm -rf your
 
     echo "Installing jess"
     cd ~
     git clone https://github.com/josephwkania/jess.git
     cd jess
-    pip install .
+    pip install --no-cache-dir .
     echo "jess Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf jess
 
@@ -184,25 +186,15 @@ From: arm64v8/ubuntu:22.04
     cd ~
     git clone https://github.com/josephwkania/will.git
     cd will
-    pip install .
+    pip install --no-cache-dir .
     echo "will Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf will
 
     # This wants to remove libboost, which we need
     #apt-get -y purge cmake build-essential git wget # remove build time dependencies
     #apt-get -y autoremove 
-    apt-get -y clean # /var/cache/apt/archives is not emptied on its own, 
-
-    # This recipe takes matplotlib/astropy/pandas/h5py/numba from apt, all built
-    # against numpy 1.21. Later pip installs pull numpy 2.x, which shadows the
-    # apt copy on sys.path and breaks every one of those extensions with
-    # "numpy.dtype size changed". Singularity and Singularity.gpu already pin
-    # this; the arm recipe never did.
-    # numba must be resolved together with numpy: apt ships numba 0.55, which
-    # only supports numpy <= 1.21 and dies with "initialization of _internal
-    # failed" against the 1.26 that "numpy<2" resolves to. 0.60 is the numba
-    # series built for this numpy range.
-    pip3 install "numpy<2" "numba>=0.59,<0.61"
+    apt-get -y clean # /var/cache/apt/archives is not emptied on its own,
+    conda clean --all
 
     # Nothing reads these after the build. pip's wheel cache is the big one --
     # 206 MB here, and wheels are already compressed, so it costs full size in
@@ -218,28 +210,28 @@ From: arm64v8/ubuntu:22.04
 
 %environment
     # For conda
-    #action="${0##*/}"
-    #if [ "$action" = "shell" ]; then
-    #    if [ "${SINGULARITY_SHELL:-}" = "/bin/bash" ]; then
-    #        set -- --noprofile --init-file /.singularity_bash
-    #    elif test -z "${SINGULARITY_SHELL:-}"; then
-    #        export SINGULARITY_SHELL=/bin/bash
-    #        set -- --noprofile --init-file /.singularity_bash
-    #    fi
-    #fi
-    
-    #source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the container
+    action="${0##*/}"
+    if [ "$action" = "shell" ]; then
+        if [ "${SINGULARITY_SHELL:-}" = "/bin/bash" ]; then
+            set -- --noprofile --init-file /.singularity_bash
+        elif test -z "${SINGULARITY_SHELL:-}"; then
+            export SINGULARITY_SHELL=/bin/bash
+            set -- --noprofile --init-file /.singularity_bash
+        fi
+    fi
+
+    source /usr/local/miniconda/bin/activate RT # sets up conda so we can access outside the container
 
     export PGPLOT_DIR=/usr/lib/pgplot5
     export TEMPO=/usr/local/tempo
     export PRESTO=/usr/local/presto
-    export LD_LIBRARY_PATH=$PRESTO/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH
     export PSRCAT_FILE=/usr/local/psrcat.db
 
 
 %runscript
-    #exec /usr/local/miniconda/RT/bin/"$@"
-    #exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    exec /usr/local/miniconda/RT/bin/"$@"
+    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
 
 
 %help
