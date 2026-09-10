@@ -1,5 +1,11 @@
 Bootstrap: docker
-From: nvidia/cuda:11.8.0-devel-ubuntu22.04
+From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
+
+%arguments
+    # Overridable with `singularity build --build-arg CUDA_VERSION=12.6.3 ...`.
+    # 11.8 stays the default: it is what the published images have always been
+    # and what the CUDA 11 driver branches in the field expect.
+    CUDA_VERSION=11.8.0
 
 
 %post
@@ -27,6 +33,14 @@ From: nvidia/cuda:11.8.0-devel-ubuntu22.04
     conda create -y --name RT python=3.10
     # conda create -y --name PE python=3.9
     conda activate RT
+
+    # TensorFlow 2.15 requires numpy<2, and FETCH needs it too. Pinning numpy
+    # only at the end is not enough: pip resolves each package against whatever
+    # numpy is current, installs numpy-2 builds of astropy, cupy and riptide,
+    # and the later downgrade then breaks them with "No module named
+    # 'numpy.lib.array_utils'". A constraint file governs every resolution.
+    echo "numpy<2" > /usr/local/pip-constraints.txt
+    export PIP_CONSTRAINT=/usr/local/pip-constraints.txt
         
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772
     echo "## Activate RT environment" >> /.singularity_bash
@@ -245,11 +259,20 @@ From: nvidia/cuda:11.8.0-devel-ubuntu22.04
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     # pip install -r requirements.txt
-    pip install tensorflow[and-cuda]==2.14 # 2.14 is the last to work with cuda-11.8
+    # TensorFlow has to match the CUDA the image was built with: 2.14 is the last
+    # release built against CUDA 11.8, and the first that works on CUDA 12 is
+    # 2.15.1 -- 2.15.0's and-cuda extra still pins a tensorrt with no wheel for
+    # this python. 2.16 is deliberately not used: it moves to Keras 3, which
+    # FETCH is not written against. Derive it rather than pin it, so the recipe
+    # follows CUDA_VERSION.
+    CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+')
+    if [ "${CUDA_MAJOR:-11}" -ge 12 ]; then TF_VERSION=2.15.1; else TF_VERSION=2.14; fi
+    echo "Installing tensorflow $TF_VERSION for CUDA ${CUDA_MAJOR:-unknown}"
+    pip install "tensorflow[and-cuda]==$TF_VERSION"
     pip install .
     echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
-    pip install "numpy<2" # We need numpy<2 for Fetch to work
+    pip install "numpy<2" # belt and braces; PIP_CONSTRAINT above already pins this
 
     # iqrm_apollo_cli links Boost at runtime. The purge below drops
     # libboost-all-dev and the autoremove then takes the runtime libraries with
@@ -321,7 +344,7 @@ From: nvidia/cuda:11.8.0-devel-ubuntu22.04
     This container has software to search for radio transients.
 
     Contains the following programs:
-    CUDA 11.8
+    CUDA {{ CUDA_VERSION }}
     fetch          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
