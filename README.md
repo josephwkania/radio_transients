@@ -11,12 +11,13 @@
 ## Overview
 
 These are my Singularity Recipes for common radio transient software.
-There are four containers
+There are four containers. The two with GPU support are published twice, once
+on CUDA 11.8 and once on CUDA 12.6, so there are six images to pull from.
 
 ### radio_transients
 Contains everything (CPU+GPU)
  
-    CUDA 11.8
+    CUDA 11.8 or 12.6
     FETCH          https://github.com/devanshkv/fetch
     heimdall       https://sourceforge.net/p/heimdall-astro/wiki/Use/
     - dedisp       https://github.com/ajameson/dedisp
@@ -38,6 +39,9 @@ Contains everything (CPU+GPU)
 
 Get with
 `singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest`
+
+or, for the CUDA 12.6 build,
+`singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest-cuda12.6`
 
 ### radio_transients_cpu
 Contains CPU based programs
@@ -68,7 +72,7 @@ Get with
 ### radio_transients_gpu
 Contains gpu based programs
 
-    CUDA 11.8
+    CUDA 11.8 or 12.6
     FETCH
     jess
     jupyterlab
@@ -81,6 +85,24 @@ Contains gpu based programs
 
 Get with
 `singularity pull radio_transients_gpu.sif oras://ghcr.io/josephwkania/radio_transients:gpu`
+
+or, for the CUDA 12.6 build,
+`singularity pull radio_transients_gpu.sif oras://ghcr.io/josephwkania/radio_transients:gpu-cuda12.6`
+
+### CUDA versions
+
+`Singularity` and `Singularity.gpu` take the CUDA version as a build argument,
+defaulting to 11.8:
+
+    singularity build radio_transients.sif Singularity
+    singularity build --build-arg CUDA_VERSION=12.6.3 radio_transients.sif Singularity
+
+TensorFlow and cupy follow it: 2.14 is the last release for CUDA 11.8, 2.15.1
+the first that works on 12, and the recipe reads `nvcc --version` to choose.
+
+Any driver from 525 up runs either image, so 11.8 is the safe default. 12.9
+would add Blackwell support and ~1.5 G per image with it; CUDA 13 does not
+build, as dedisp does not compile against its Thrust.
 
 ### How to use
 Your `$HOME` automatically gets mounted.
@@ -130,19 +152,20 @@ slow parts, `--keep` leaves the scratch directory for inspection, and
 Output is TAP 13, and the exit status is 0 only when every non-skipped
 assertion passed -- so the suites can gate a build.
 
-Results from a full rebuild of all four variants (7-Sep-2026, Tesla T4):
+Results from a rebuild of every image (10-Sep-2026, Tesla T4):
 
-| Variant | Image | `container_test.sh` | `gpu_test.sh` |
-|---|---|---|---|
-| radio_transients      | 11 G  | 151 passed, 0 failed, 18 skipped | 18 / 0 / 0 |
-| radio_transients_gpu  | 9.6 G | 50 / 0 / 4                        | 18 / 0 / 0 |
-| radio_transients_cpu  | 1.5 G | 113 / 0 / 18                      | n/a |
-| arm (aarch64)         | 1.2 G | 111 / 0 / 20                      | n/a |
+| Image | Tag | Size | `container_test.sh` | `gpu_test.sh` |
+|---|---|---|---|---|
+| radio_transients     | `latest`          | 6.7 G | 151 passed, 0 failed, 18 skipped | 18 / 0 / 0 |
+| radio_transients     | `latest-cuda12.6` | 7.0 G | 151 / 0 / 18 | 18 / 0 / 0 |
+| radio_transients_gpu | `gpu`             | 6.5 G | 50 / 0 / 4   | 18 / 0 / 0 |
+| radio_transients_gpu | `gpu-cuda12.6`    | 6.8 G | 50 / 0 / 4   | 18 / 0 / 0 |
+| radio_transients_cpu | `cpu`             | 1.1 G | 113 / 0 / 18 | n/a |
+| arm (aarch64)        | `arm`             | 994 M | 113 / 0 / 18 | n/a |
 
 Skips are expected: a variant is not asked for tools it does not ship, and the
-GPU-less suite skips assertions that need real hardware. The arm figures above
-come from a qemu-emulated build on an x86 host; CI builds that variant
-natively on an ARM runner.
+GPU-less suite skips assertions that need real hardware. The arm figures come
+from a native aarch64 build.
 
 `tests/README.md` explains what each layer catches and why, including the
 checks that exist specifically to catch a passing-but-wrong result -- such as
