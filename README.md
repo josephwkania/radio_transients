@@ -15,6 +15,7 @@ There are four containers. The two with GPU support are published twice, once
 on CUDA 11.8 and once on CUDA 12.6, so there are six images to pull from.
 
 ### radio_transients
+
 Contains everything (CPU+GPU)
  
     CUDA 11.8 or 12.6
@@ -44,6 +45,7 @@ or, for the CUDA 12.6 build,
 `singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest-cuda12.6`
 
 ### radio_transients_cpu
+
 Contains CPU based programs
 
     htop
@@ -63,6 +65,7 @@ Get with
 `singularity pull radio_transients_cpu.sif oras://ghcr.io/josephwkania/radio_transients:cpu`
 
 ### radio_transients arm
+
 The CPU container built for arm64 (aarch64), from `Singularity.arm`. Same
 programs as `radio_transients_cpu`.
 
@@ -70,6 +73,7 @@ Get with
 `singularity pull radio_transients_arm.sif oras://ghcr.io/josephwkania/radio_transients:arm`
 
 ### radio_transients_gpu
+
 Contains gpu based programs
 
     CUDA 11.8 or 12.6
@@ -105,6 +109,7 @@ would add Blackwell support and ~1.5 G per image with it; CUDA 13 does not
 build, as dedisp does not compile against its Thrust.
 
 ### How to use
+
 Your `$HOME` automatically gets mounted.
 You can mount a directory with `-B /dir/on/host:/mnt`, which will mount `/dir/on/host` to `/mnt` in the container. 
 
@@ -213,13 +218,10 @@ If your processor your processor is significantly older than this, you may run i
 the older processor not having the whole instruction set needed. In this case, you should build
 use singularity to build the image locally. 
 
-An archival version of these (built 25-April-2021) are on Singularity Hub at: 
-https://singularity-hub.org/collections/5231
-[![https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg](https://www.singularity-hub.org/static/img/hosted-singularity--hub-%23e32929.svg)](https://singularity-hub.org/collections/5231)
-
-
 ### Improvements
+
 If you come across bug or have suggestions for improvements, let me know or submit a pull request.
 
 ### Thanks
+
 To Kshitij Aggarwal for bug reports and suggestions.
