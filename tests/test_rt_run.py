@@ -1,200 +1,38 @@
 """Tests for rt-run (src/rt_run.py), without a container runtime or an image.
 
-A stub `apptainer` stands in for the real one: `pull` writes a small JSON file
+The stand-ins are in rt_run_fakes.py. A stub `apptainer` takes the real one's
+place: `pull` writes a small JSON file
 as the image, the scan prints a fixture (or, for one test, runs rt-run's real
 scan code against a fake PATH), and any other `exec` prints the arguments it
 was given, one per line -- which is what the bind-mount assertions read.
-build-test-push.yml runs rt-run for real against every image it builds.
+A fake registry answers the digest lookups. build-test-push.yml runs rt-run
+for real against every image it builds.
 
     pip install . pytest && pytest tests/test_rt_run.py
 """
 
-import json
 import os
 import platform
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-HERE = Path(__file__).resolve().parent
-SRC = HERE.parent / "src"
-RT_RUN = SRC / "rt_run.py"
-sys.path.insert(0, str(SRC))
-
-import rt_run  # noqa: E402  pylint: disable=wrong-import-position
+from rt_run_fakes import E, HERE, REGISTRY, RT_RUN
+from rt_run_fakes import FakeRegistry, World, fake_digest
+import rt_run  # pylint: disable=wrong-import-order  # importable once rt_run_fakes ran
 
 # What install writes to RT_HOME/rt-run.
 INSTALLED = rt_run.as_launcher(RT_RUN.read_text())
 
-E = "/usr/local/miniconda/envs/RT/bin"
-REGISTRY = "oras://ghcr.io/josephwkania/radio_transients"
-
-# An image's PATH, as scan() reports it: [dir, name, kind] in PATH order.
-LISTING = [
-    [E, "python", "x"],
-    [E, "python3.10", "x"],
-    [E, "python3-config", "x"],
-    [E, "pip", "x"],
-    [E, "rt-run", "x"],
-    [E, "your_header.py", "x"],
-    [E, "jupyter", "x"],
-    [E, "pylint", "x"],
-    [E, "xz", "x"],
-    ["/usr/local/miniconda/condabin", "conda", "x"],
-    ["/usr/local/bin", "heimdall", "x"],
-    ["/usr/local/bin", "your_header.py", "x"],
-    ["/usr/local/bin", "psrdada.pc", "-"],
-    ["/usr/local/cuda/bin", "nvcc", "x"],
-    ["/usr/bin", "ls", "x"],
-    ["/bin", "sh", "x"],
-]
 LINKED = ["heimdall", "jupyter", "your_header.py"]
 NOT_LINKED = [
     *("python", "python3.10", "python3-config", "pip", "pylint", "xz"),
     *("conda", "psrdada.pc", "nvcc", "ls", "sh"),
 ]
-
-STUB = r"""#!{python}
-import json, os, subprocess, sys
-
-state = os.environ["STUB_DIR"]
-args = sys.argv[1:]
-
-
-def read(name, default=""):
-    try:
-        with open(os.path.join(state, name)) as handle:
-            return handle.read()
-    except FileNotFoundError:
-        return default
-
-
-if args[0] == "pull":
-    dest, uri = [a for a in args[1:] if not a.startswith("-")]
-    with open(os.path.join(state, "pulls"), "a") as handle:
-        handle.write(uri + "\n")
-    if read("pull_fails"):
-        sys.exit(1)
-    with open(dest, "w") as handle:
-        json.dump({{"uri": uri, "built": read("built").strip()}}, handle)
-elif args[0] == "exec" and args[1] == "--cleanenv":
-    sif, cmd = args[2], args[3:]
-    if cmd[0] == "cat":
-        print(read("image_rt_run"), end="")
-    elif read("real_scan_path"):
-        env = {{"PATH": read("real_scan_path")}}
-        sys.exit(subprocess.run([sys.executable] + cmd[1:], env=env).returncode)
-    else:
-        found = json.loads(read("scan.json"))
-        try:
-            with open(sif) as handle:
-                found["built"] = json.load(handle).get("built", "")
-        except ValueError:
-            pass
-        print(json.dumps(found))
-elif args[0] == "exec":
-    print("\n".join(["exec"] + args[1:]))
-else:
-    sys.exit(99)
-"""
-
-
-class Result:
-    def __init__(self, proc):
-        self.rc = proc.returncode
-        self.out = proc.stdout
-
-    def lines(self):
-        return self.out.splitlines()
-
-    def binds(self):
-        lines = self.lines()
-        return [lines[i + 1] for i, line in enumerate(lines) if line == "-B"]
-
-    def tail(self, n):
-        return self.lines()[-n:]
-
-
-class World:
-    """A HOME, a stub runtime and the paths rt-run will use, under root."""
-
-    def __init__(self, root):
-        self.root = root
-        self.home = root / "home"
-        self.rt = self.home / ".local/share/radio_transients"
-        self.bin = self.rt / "bin"
-        self.state = root / "state"
-        stub, gpu = root / "stub", root / "gpu"
-        for directory in (self.home, self.state, stub, gpu):
-            directory.mkdir()
-        (stub / "apptainer").write_text(STUB.format(python=sys.executable))
-        (gpu / "nvidia-smi").write_text("#!/bin/sh\necho 'GPU 0: stub'\n")
-        for path in (stub / "apptainer", gpu / "nvidia-smi"):
-            path.chmod(0o755)
-        # GPU_PATH always finds an nvidia-smi; PATH only if this machine has one.
-        self.path = f"{stub}:{os.environ['PATH']}"
-        self.gpu_path = f"{gpu}:{self.path}"
-        self.listing()
-        self.built("Monday_7_September_2026")
-
-    def listing(self, commands=None, tag="", module=None):
-        """What the stub's scan reports; module is the image's [path, version]
-        of rt_run, if it has one."""
-        found = {
-            "commands": LISTING if commands is None else commands,
-            "from_source": ["your_header.py", "rt-run"],
-            "tag": tag,
-            "built": "",
-            "self": module,
-        }
-        (self.state / "scan.json").write_text(json.dumps(found))
-
-    def built(self, date):
-        (self.state / "built").write_text(date)
-
-    def pulls(self):
-        path = self.state / "pulls"
-        return path.read_text().splitlines() if path.exists() else []
-
-    def env(self, **extra):
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(("RT_", "SINGULARITY", "APPTAINER", "XDG_"))
-        }
-        env.update(HOME=str(self.home), PATH=self.path, STUB_DIR=str(self.state))
-        for key, value in extra.items():
-            if value is None:
-                env.pop(key, None)  # as if never set
-            else:
-                env[key] = str(value)
-        return env
-
-    def run(self, cmd, cwd=None, **env):
-        proc = subprocess.run(
-            [str(c) for c in cmd],
-            cwd=str(cwd or self.home),
-            env=self.env(**env),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            check=False,
-        )
-        return Result(proc)
-
-    def rt_run(self, *args, **kw):
-        return self.run([sys.executable, RT_RUN] + list(args), **kw)
-
-    def tool(self, name, *args, **kw):
-        return self.run([self.bin / name] + list(args), **kw)
-
-    def ours(self, path):
-        return path.is_symlink() and os.readlink(path) == str(self.rt / "rt-run")
 
 
 @pytest.fixture(name="w")
@@ -206,7 +44,9 @@ def world():
     if str(root).startswith(("/tmp/", "/var/tmp/")):
         shutil.rmtree(str(root))
         pytest.skip("the checkout is under /tmp, which Singularity always mounts")
-    yield World(root)
+    registry = FakeRegistry()
+    yield World(root, registry)
+    registry.stop()
     shutil.rmtree(str(root))
 
 
@@ -257,7 +97,9 @@ def test_version_and_help(w):
 
 
 def test_install_pulls_the_tag_and_records_it(full):
-    assert full.pulls() == [f"{REGISTRY}:latest"]
+    digest = full.registry.digests["latest"]
+    assert full.pulls() == [f"{REGISTRY}@{digest}"]  # what was resolved, exactly
+    assert (full.rt / "digest").read_text().strip() == digest
     assert (full.rt / "image.sif").is_file()
     assert not (full.rt / "image.sif.new").exists()
     assert (full.rt / "tag").read_text().strip() == "latest"
@@ -322,6 +164,8 @@ def test_list_says_when_the_image_was_pulled_and_from_where(full):
 
 
 def test_history_keeps_a_line_per_install_and_update(full):
+    first = full.registry.digests["latest"]
+    second = full.registry.move()
     full.built("Monday_14_September_2026")
     assert full.tool("rt-run", "update").rc == 0
     rows = history(full)
@@ -330,7 +174,9 @@ def test_history_keeps_a_line_per_install_and_update(full):
         "radio_transients:latest",
         "built Monday_7_September_2026",
         f"{REGISTRY}:latest",
+        first,
     ]
+    assert rows[1][5] == second
     assert rows[1][3] == "built Monday_14_September_2026"
     assert all(re.fullmatch(WHEN, row[0]) for row in rows)
 
@@ -344,15 +190,64 @@ def test_an_install_from_a_file_records_the_file(w):
         "radio_transients:cpu",
         "built unknown",
         str(mine),
+        "-",  # no registry digest for a file
     ]
     out = w.tool("rt-run", "list").out
     assert re.search(rf"  installed  {WHEN}, from {re.escape(str(mine))}\n", out)
 
 
 def test_a_failed_update_leaves_no_history(full):
+    full.registry.move()
     (full.state / "pull_fails").write_text("1")
     assert full.tool("rt-run", "update").rc == 1
     assert [row[1] for row in history(full)] == ["install"]
+
+
+def test_list_gives_the_digest_and_how_to_install_it_again(full):
+    digest = full.registry.digests["latest"]
+    out = full.tool("rt-run", "list").out
+    assert f"  digest     {digest}\n" in out
+    assert f"    rt-run install latest --digest {digest}\n" in out
+
+
+def test_install_digest_pulls_that_exact_build(w):
+    old = w.registry.digests["gpu"]
+    w.registry.move("gpu")  # the tag has moved on since
+    result = w.rt_run("install", "gpu", "--digest", old)
+    assert result.rc == 0, result.out
+    assert w.pulls() == [f"{REGISTRY}@{old}"]
+    assert (w.rt / "tag").read_text().strip() == "gpu"
+    assert history(w)[-1][5] == old
+
+
+@pytest.mark.parametrize(
+    "args, complaint",
+    [
+        (["gpu", "--digest", "sha256:abc"], "isn't a digest"),
+        (["--digest", fake_digest("gpu", 0)], "name the variant"),
+        (["gpu", "--digest", fake_digest("gpu", 0), "--from", "x.sif"], "--from"),
+    ],
+)
+def test_install_digest_is_checked(w, args, complaint):
+    (w.home / "x.sif").write_text("{}")
+    result = w.rt_run("install", *args)
+    assert result.rc == 2 and complaint in result.out
+    assert not w.pulls()
+
+
+def test_without_the_registry_it_pulls_by_tag(w):
+    result = w.rt_run("install", "full", RT_REGISTRY_API="http://127.0.0.1:9")
+    assert result.rc == 0, result.out
+    assert "no digest to record" in result.out
+    assert w.pulls() == [f"{REGISTRY}:latest"]
+    assert history(w)[-1][5] == "-"
+    assert "--digest" not in w.tool("rt-run", "list").out
+
+
+def test_resolve_digest(w, monkeypatch):
+    monkeypatch.setenv("RT_REGISTRY_API", w.registry.url)
+    assert rt_run.resolve_digest("cpu") == w.registry.digests["cpu"]
+    assert rt_run.resolve_digest("no-such-tag") == ""
 
 
 def host_command(w, name):
@@ -605,6 +500,7 @@ def test_a_deleted_image_is_reported(full):
 
 
 def test_update_relinks_and_never_replaces_a_users_file(full):
+    first, second = full.registry.digests["latest"], full.registry.move()
     (full.bin / "mine").write_text("a user's own file")
     (full.bin / "riptide").write_text("a user's own riptide")
     full.listing(
@@ -617,7 +513,7 @@ def test_update_relinks_and_never_replaces_a_users_file(full):
     )
     result = full.tool("rt-run", "update")
     assert result.rc == 0, result.out
-    assert full.pulls() == [f"{REGISTRY}:latest"] * 2
+    assert full.pulls() == [f"{REGISTRY}@{first}", f"{REGISTRY}@{second}"]
     assert not (full.bin / "jupyter").exists()  # dropped by the image
     assert full.ours(full.bin / "rffa")  # gained
     assert (full.bin / "riptide").read_text() == "a user's own riptide"
@@ -625,13 +521,26 @@ def test_update_relinks_and_never_replaces_a_users_file(full):
     assert (full.bin / "mine").exists()
 
 
-def test_update_says_whether_the_image_changed(full):
-    assert "already up to date" in full.tool("rt-run", "update").out
+def test_update_downloads_nothing_while_the_tag_has_not_moved(full):
+    result = full.tool("rt-run", "update")
+    assert result.rc == 0 and "already up to date" in result.out
+    assert len(full.pulls()) == 1 and len(history(full)) == 1
+    full.registry.move()
     full.built("Monday_14_September_2026")
-    assert "already up to date" not in full.tool("rt-run", "update").out
+    result = full.tool("rt-run", "update")
+    assert result.rc == 0 and "already up to date" not in result.out
+    assert len(full.pulls()) == 2
+
+
+def test_without_a_digest_update_compares_build_dates(full):
+    offline = {"RT_REGISTRY_API": "http://127.0.0.1:9"}
+    assert "already up to date" in full.tool("rt-run", "update", **offline).out
+    full.built("Monday_14_September_2026")
+    assert "already up to date" not in full.tool("rt-run", "update", **offline).out
 
 
 def test_update_takes_rt_run_from_the_image_when_newer(full):
+    full.registry.move()
     (full.state / "image_rt_run").write_text("#!/usr/bin/env python3\n# newer\n")
     full.listing(module=["/x/rt_run.py", "999.0.0"])
     assert full.tool("rt-run", "update").rc == 0
@@ -639,6 +548,7 @@ def test_update_takes_rt_run_from_the_image_when_newer(full):
 
 
 def test_update_keeps_its_own_rt_run_when_the_images_is_older(full):
+    full.registry.move()
     (full.state / "image_rt_run").write_text("# older\n")
     full.listing(module=["/x/rt_run.py", "0.0.1"])
     assert full.tool("rt-run", "update").rc == 0
@@ -646,6 +556,7 @@ def test_update_keeps_its_own_rt_run_when_the_images_is_older(full):
 
 
 def test_a_failed_pull_leaves_the_install_as_it_was(full):
+    full.registry.move()
     (full.state / "pull_fails").write_text("1")
     result = full.tool("rt-run", "update")
     assert result.rc == 1 and "could not pull" in result.out
@@ -654,6 +565,7 @@ def test_a_failed_pull_leaves_the_install_as_it_was(full):
 
 
 def test_an_image_with_no_tools_is_refused(full):
+    full.registry.move()
     full.listing([])
     result = full.tool("rt-run", "update")
     assert result.rc == 1 and "found no tools" in result.out
@@ -672,7 +584,7 @@ def test_install_from_hard_links_the_image_and_moves_the_links(full):
     mine.write_text("{}")
     result = full.tool("rt-run", "install", "cpu", "--from", mine, "--bin-dir", "~x")
     assert result.rc == 0, result.out
-    assert full.pulls() == [f"{REGISTRY}:latest"]  # the first install's only
+    assert len(full.pulls()) == 1  # the first install's only
     assert (full.rt / "image.sif").stat().st_ino == mine.stat().st_ino
     new_bin = full.home / "~x"
     assert (full.rt / "bin-dir").read_text().strip() == str(new_bin)

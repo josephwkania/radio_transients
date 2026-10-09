@@ -27,6 +27,8 @@ Environment:
               nvidia-smi is found)
     RT_BIND   extra comma-separated bind specs, e.g. /data,/scratch:/mnt
     RT_DEBUG  print the command instead of running it
+    RT_REGISTRY_API  the registry's API (default: https://ghcr.io); the
+              tests point it at a fake one
 
 Standard library only. The host side runs on whatever python3 a login node
 has, and scan() also runs on the python inside the images.
@@ -39,6 +41,7 @@ import inspect
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -48,6 +51,9 @@ import time
 __version__ = "0.1.0"
 
 REGISTRY = "oras://ghcr.io/josephwkania/radio_transients"
+REPOSITORY = "josephwkania/radio_transients"
+OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 # What users type, mapped to the GHCR tag. The tags themselves work too.
 VARIANTS = {
@@ -65,7 +71,7 @@ CPU_ONLY = ("cpu", "arm")
 
 USAGE = """\
 Usage:
-  rt-run install [VARIANT] [--bin-dir DIR] [--from FILE.sif]
+  rt-run install [VARIANT] [--bin-dir DIR] [--from FILE.sif | --digest SHA]
   rt-run update            pull the image again; the tags are rebuilt weekly
   rt-run list              the tools the installed image puts on your PATH
   rt-run uninstall         remove the links, and the image if rt-run pulled it
@@ -84,6 +90,9 @@ pull picks arm on aarch64, full when nvidia-smi is found, and cpu otherwise.
 
 --from FILE.sif installs an image you already have instead of pulling one;
 inside an image, `singularity run --app install IMAGE` does the same.
+
+--digest sha256:... pulls that exact build of VARIANT, as `rt-run list` and
+the history file record it, rather than whatever its tag points at now.
 """
 
 
@@ -119,6 +128,7 @@ class Home:
     engine    the apptainer or singularity install and update ran with
     arrived   when the image was pulled, or installed --from a file
     origin    where from: the registry and tag, or the file
+    digest    the registry's sha256 for the image pulled, which pins it
     history   a line per install and update, never rewritten: which image
               was in use when, for anyone asking what their results ran on
     """
@@ -505,14 +515,54 @@ def place_image(home, source):
         return os.path.abspath(source)
 
 
-def pull(engine, tag, dest):
+def resolve_digest(tag):
+    """The digest the tag points at now, or "" if the registry can't say.
+
+    Two small requests, no login: an anonymous pull token, then the tag's
+    manifest headers, which carry its digest."""
+    # Imported here, not above: it brings in http and ssl, and every tool
+    # run starts this module, while only install and update need them.
+    import urllib.request  # pylint: disable=import-outside-toplevel
+
+    api = os.environ.get("RT_REGISTRY_API", "https://ghcr.io")
+    try:
+        url = f"{api}/token?scope=repository:{REPOSITORY}:pull"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            token = json.load(response)["token"]
+        request = urllib.request.Request(
+            f"{api}/v2/{REPOSITORY}/manifests/{tag}",
+            method="HEAD",
+            headers={"Authorization": f"Bearer {token}", "Accept": OCI_MANIFEST},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            digest = response.headers.get("Docker-Content-Digest", "")
+    except (OSError, ValueError, KeyError):
+        return ""
+    return digest if DIGEST.fullmatch(digest) else ""
+
+
+def digest_for(tag):
+    digest = resolve_digest(tag)
+    if not digest:
+        print(
+            "rt-run: the registry didn't say which image the tag is now; "
+            "pulling by tag, with no digest to record",
+            file=sys.stderr,
+        )
+    return digest
+
+
+def pull(engine, tag, dest, digest=""):
+    """Pull by digest when there is one -- exactly the image resolved, even
+    if the weekly rebuild moves the tag meanwhile -- or else by tag."""
     remove(dest)
-    print(f"Pulling {REGISTRY}:{tag}", flush=True)
+    ref = f"{REGISTRY}@{digest}" if digest else f"{REGISTRY}:{tag}"
+    print(f"Pulling {ref}", flush=True)
     # The tags are rebuilt weekly, so a cached copy is almost never reused,
     # and caching would keep a second copy of a multi-gigabyte image.
-    cmd = [engine, "pull", "--disable-cache", dest, f"{REGISTRY}:{tag}"]
+    cmd = [engine, "pull", "--disable-cache", dest, ref]
     if subprocess.run(cmd, check=False).returncode != 0:
-        raise Error(f"could not pull {REGISTRY}:{tag}")
+        raise Error(f"could not pull {ref}")
     return dest
 
 
@@ -668,39 +718,65 @@ def image_source(home, inside, source):
     return None, inside
 
 
-def record(home, action, origin):
+def record(home, action, origin, digest=""):
     """Note when the image arrived and where from, and add it to history."""
     when = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     home.put("arrived", when)
     home.put("origin", origin)
+    home.put("digest", digest)
     fields = [when, action, f"radio_transients:{home.get('tag')}"]
-    fields += [f"built {home.get('built') or 'unknown'}", origin]
+    fields += [f"built {home.get('built') or 'unknown'}", origin, digest or "-"]
     with open(home.path("history"), "a", encoding="utf-8") as handle:
         handle.write("\t".join(fields) + "\n")
+
+
+def requested_tag(opts, source):
+    """The tag asked for; the default, when pulling; or "" when the image
+    being installed --from will say which it is."""
+    if opts.digest:
+        if source:
+            raise UsageError(
+                "--digest pulls an image; it can't go with --from, or run "
+                "inside an image",
+                show_usage=False,
+            )
+        if not DIGEST.fullmatch(opts.digest):
+            raise UsageError(
+                f"{opts.digest} isn't a digest; they are sha256: and 64 hex digits",
+                show_usage=False,
+            )
+        if not opts.variant:
+            raise UsageError(
+                "name the variant the digest is a build of, "
+                f"e.g. rt-run install gpu --digest {opts.digest}",
+                show_usage=False,
+            )
+    if opts.variant:
+        tag = VARIANTS.get(opts.variant, "")
+        if not tag:
+            raise UsageError(f"unknown variant '{opts.variant}'")
+        return tag
+    return "" if source else VARIANTS[default_variant()]
 
 
 def cmd_install(argv):
     parser = argparse.ArgumentParser(
         prog="rt-run install",
-        usage="rt-run install [VARIANT] [--bin-dir DIR] [--from FILE.sif]",
+        usage="rt-run install [VARIANT] [--bin-dir DIR] "
+        "[--from FILE.sif | --digest SHA]",
         epilog="`rt-run --help` lists the variants.",
     )
     parser.add_argument("variant", nargs="?")
     parser.add_argument("--bin-dir")
     parser.add_argument("--from", dest="source")
+    parser.add_argument("--digest")
     opts = parser.parse_args(argv)
 
     home = Home.from_env()
     inside = own_image()
     engine, source = image_source(home, inside, opts.source)
 
-    tag = ""
-    if opts.variant:
-        tag = VARIANTS.get(opts.variant, "")
-        if not tag:
-            raise UsageError(f"unknown variant '{opts.variant}'")
-    elif not source:
-        tag = VARIANTS[default_variant()]
+    tag = requested_tag(opts, source)
     if tag:
         check_arch(tag)
 
@@ -708,11 +784,13 @@ def cmd_install(argv):
     bin_dir = os.path.abspath(
         opts.bin_dir or home.get("bin-dir") or home.path("bin")
     )  # a reinstall keeps the bin dir an earlier --bin-dir chose
+    digest = ""
     with cleanup_on_failure(home):
         if source:
             image = place_image(home, source)
         else:
-            image = pull(engine, tag, home.pending)
+            digest = opts.digest or digest_for(tag)
+            image = pull(engine, tag, home.pending, digest)
         found = scan() if inside else scan_image(engine, image)
         if not tag:
             tag = found.get("tag", "")
@@ -725,7 +803,8 @@ def cmd_install(argv):
             check_arch(tag)
         install_script(home, engine, image, found)
         activate(home, image, tag, bin_dir, found)
-    record(home, "install", os.path.abspath(source) if source else f"{REGISTRY}:{tag}")
+    origin = os.path.abspath(source) if source else f"{REGISTRY}:{tag}"
+    record(home, "install", origin, digest)
     if engine:
         home.put("engine", engine)
     return 0
@@ -739,13 +818,17 @@ def cmd_update():
     if not tag:
         raise Error("nothing installed yet; run `rt-run install`")
     engine = find_engine(home)
+    digest = digest_for(tag)
+    if digest and digest == home.get("digest") and os.path.isfile(home.get("image")):
+        print(f"radio_transients:{tag} is already up to date: {digest}")
+        return 0
     before = home.get("built")
     with cleanup_on_failure(home):
-        image = pull(engine, tag, home.pending)
+        image = pull(engine, tag, home.pending, digest)
         found = scan_image(engine, image)
         install_script(home, engine, image, found)
         activate(home, image, tag, home.get("bin-dir"), found)
-    record(home, "update", f"{REGISTRY}:{tag}")
+    record(home, "update", f"{REGISTRY}:{tag}", digest)
     home.put("engine", engine)
     if before and before == found.get("built"):
         print("(The image was already up to date.)")
@@ -763,7 +846,15 @@ def cmd_list():
     if origin:  # not recorded by installs older than this
         verb = "pulled" if origin.startswith("oras://") else "installed"
         print(f"  {verb:10} {home.get('arrived')}, from {origin}")
+    digest = home.get("digest")
+    if digest:
+        print(f"  digest     {digest}")
+    if origin:
         print(f"  history    {home.path('history')}")
+    if digest:
+        print()
+        print("To install exactly this image again, anywhere:")
+        print(f"    rt-run install {home.get('tag')} --digest {digest}")
     print()
     print(f"Linked in {home.get('bin-dir')}:")
     width = max((len(t) for t in tools), default=0) + 2
@@ -786,7 +877,7 @@ def cmd_uninstall():
     unlink_all(bin_dir, home.script)
     for name in ("image", "tag", "bin-dir", "built", "commands", "tools", "engine"):
         remove(home.path(name))
-    for name in ("arrived", "origin", "history"):
+    for name in ("arrived", "origin", "digest", "history"):
         remove(home.path(name))
     for path in (home.pulled, home.pending, home.script):
         remove(path)

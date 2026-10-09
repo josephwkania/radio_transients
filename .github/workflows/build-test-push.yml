@@ -14,6 +14,7 @@ on:
       - 'tests/**'
       # Tests rt-run alone, with no image; rt-run.yml runs it in a minute.
       - '!tests/test_rt_run.py'
+      - '!tests/rt_run_fakes.py'
       - '.github/workflows/build-test-push.yml'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'pyproject.toml'
       - 'tests/**'
       - '!tests/test_rt_run.py'
+      - '!tests/rt_run_fakes.py'
   schedule:
     # Weekly rebuild, so upstream breakage surfaces on a Monday rather than
     # the morning someone needs the container.

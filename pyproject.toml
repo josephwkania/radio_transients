@@ -42,6 +42,11 @@ target-version = ["py38"]
 # The tests have their own .pylintrc, in tests/.
 ignore-paths = ["tests/"]
 
+[tool.pylint.format]
+# rt_run is one file on purpose: it is what every link runs, what each image
+# carries, and what `update` copies from an image to the host.
+max-module-lines = 1300
+
 [tool.pylint."messages control"]
 disable = [
     # The usage text and docstrings say what each command does.

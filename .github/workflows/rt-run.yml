@@ -13,6 +13,7 @@ on:
       - 'pyproject.toml'
       - '.flake8'
       - 'tests/test_rt_run.py'
+      - 'tests/rt_run_fakes.py'
       - '.github/workflows/rt-run.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'pyproject.toml'
       - '.flake8'
       - 'tests/test_rt_run.py'
+      - 'tests/rt_run_fakes.py'
       - '.github/workflows/rt-run.yml'
   workflow_dispatch:
 
@@ -45,7 +47,7 @@ jobs:
             pylint==4.0.8
 
       - name: black
-        run: black --check --diff src/ tests/test_rt_run.py
+        run: black --check --diff src/ tests/test_rt_run.py tests/rt_run_fakes.py
 
       - name: flake8
         run: flake8 src/

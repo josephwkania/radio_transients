@@ -145,10 +145,18 @@ are, so for those, name it: `rt-run install gpu --from old.sif`.
   the image runs as `rt-run COMMAND`, e.g. `rt-run python script.py`.
 - `rt-run uninstall` removes the links, and the image if `rt-run` pulled it.
 
-`rt-run list` also shows when the image was pulled, where from, and when it
-was built. Since the tags move every week, `~/.local/share/radio_transients/history`
-keeps a line for every install and update -- time, tag, build date, source --
-so you can tell which image a result was produced with.
+`rt-run list` also shows when the image was pulled, where from, when it was
+built, and its digest: the registry's fingerprint for exactly that build.
+The tags move every week; a digest never does, and
+
+    rt-run install gpu --digest sha256:...
+
+installs that same build again, here or anywhere. `rt-run` pulls by digest
+whenever the registry will say what a tag points at, and `update` uses it to
+download nothing when the tag hasn't moved.
+`~/.local/share/radio_transients/history` keeps a line for every install and
+update -- time, tag, build date, source, digest -- so you can tell which image
+a result was produced with.
 
 Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
 with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
