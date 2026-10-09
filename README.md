@@ -245,8 +245,10 @@ pushes to GHCR only if the tests pass -- an image that fails is never tagged.
 The tests include `singularity run`, and installing `rt-run` from the image
 just built, both with its `install` app and from the host. `rt-run.yml` lints,
 tests and builds `rt-run` on its own, in a minute, when only it changes.
-`pypi.yml` publishes it to PyPI when a GitHub release is published, once PyPI
-trusts this repository -- its header says how to set that up.
+`pypi.yml` publishes it to PyPI when a GitHub release is published; run by
+hand from the Actions tab, it uploads a `.dev` build to TestPyPI instead and
+installs it back from there, as a dry run. Both need PyPI to trust this
+repository first -- the workflow's header says how to set that up.
 `gpu-test.yml` runs the GPU suite on a self-hosted runner with a real card.
 
 A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.

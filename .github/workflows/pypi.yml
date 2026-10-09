@@ -1,28 +1,35 @@
 name: publish rt-run to PyPI
 
-# Uploads rt-run to PyPI, as `radio-transients`, when a GitHub release is
-# published. It uses PyPI's trusted publishing, so no token is stored here --
-# and it does nothing useful until, once, by hand:
+# Uploads rt-run, as `radio-transients`, to PyPI when a GitHub release is
+# published. Run by hand from the Actions tab, it uploads to TestPyPI instead
+# and installs the result back from there: a dry run of the real thing.
 #
-#   1. on pypi.org, a pending trusted publisher is added for project
-#      `radio-transients`: this repository, workflow `pypi.yml`, environment
-#      `pypi` (https://docs.pypi.org/trusted-publishers/), and
-#   2. in this repository's settings, an environment named `pypi` exists.
+# Both use PyPI's trusted publishing, so no token is stored here. Once, by
+# hand, on pypi.org and on test.pypi.org, add a pending trusted publisher for
+# project `radio-transients`: owner josephwkania, repository
+# radio_transients, workflow `pypi.yml`, and environment `pypi` on PyPI,
+# `testpypi` on TestPyPI (https://docs.pypi.org/trusted-publishers/). GitHub
+# creates the two environments the first time a job uses them; protection
+# rules on them, under Settings -> Environments, are optional.
 #
-# Bump __version__ in src/rt_run.py first; the release's tag must match it.
+# To release: bump __version__ in src/rt_run.py, merge that to main, and
+# publish a release tagged v<version>. Neither index ever takes a version
+# twice, so each dry run uploads <version>.dev<run number>.
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: pypi
-    permissions:
-      contents: read
-      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +39,7 @@ jobs:
           python-version: '3.12'
 
       - name: Check the tag matches the version
+        if: github.event_name == 'release'
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -41,9 +49,85 @@ jobs:
             exit 1
           fi
 
+      - name: Give the dry run a version of its own
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          sed -i -E "s/^__version__ = \"([^\"]+)\"$/__version__ = \"\1.dev$RUN\"/" src/rt_run.py
+          grep -E "^__version__ = \"[^\"]+\.dev$RUN\"$" src/rt_run.py
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python -c 'import sys; sys.path.insert(0, "src"); import rt_run; print(rt_run.__version__)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build
         run: |
           pip install --no-cache-dir build
           python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/radio-transients/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      # What the dry run is for: install the upload as a user would. A new
+      # upload can take a minute or two to show in TestPyPI's index.
+      - name: Install it from TestPyPI
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 -m venv /tmp/env
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if /tmp/env/bin/pip install --no-cache-dir \
+                --index-url https://test.pypi.org/simple/ \
+                "radio-transients==$VERSION"; then
+              break
+            fi
+            echo "not in the index yet (attempt $attempt); waiting"
+            sleep 30
+          done
+          /tmp/env/bin/rt-run --version | grep -qxF "rt-run $VERSION"
+          /tmp/env/bin/rt-run --help
+
+  pypi:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/radio-transients/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
