@@ -43,6 +43,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 __version__ = "0.1.0"
 
@@ -116,6 +117,10 @@ class Home:
     tools     the commands that got a link
     rt-run    the copy of this file every link points at
     engine    the apptainer or singularity install and update ran with
+    arrived   when the image was pulled, or installed --from a file
+    origin    where from: the registry and tag, or the file
+    history   a line per install and update, never rewritten: which image
+              was in use when, for anyone asking what their results ran on
     """
 
     def __init__(self, root):
@@ -663,6 +668,17 @@ def image_source(home, inside, source):
     return None, inside
 
 
+def record(home, action, origin):
+    """Note when the image arrived and where from, and add it to history."""
+    when = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    home.put("arrived", when)
+    home.put("origin", origin)
+    fields = [when, action, f"radio_transients:{home.get('tag')}"]
+    fields += [f"built {home.get('built') or 'unknown'}", origin]
+    with open(home.path("history"), "a", encoding="utf-8") as handle:
+        handle.write("\t".join(fields) + "\n")
+
+
 def cmd_install(argv):
     parser = argparse.ArgumentParser(
         prog="rt-run install",
@@ -709,6 +725,7 @@ def cmd_install(argv):
             check_arch(tag)
         install_script(home, engine, image, found)
         activate(home, image, tag, bin_dir, found)
+    record(home, "install", os.path.abspath(source) if source else f"{REGISTRY}:{tag}")
     if engine:
         home.put("engine", engine)
     return 0
@@ -728,6 +745,7 @@ def cmd_update():
         found = scan_image(engine, image)
         install_script(home, engine, image, found)
         activate(home, image, tag, home.get("bin-dir"), found)
+    record(home, "update", f"{REGISTRY}:{tag}")
     home.put("engine", engine)
     if before and before == found.get("built"):
         print("(The image was already up to date.)")
@@ -739,7 +757,15 @@ def cmd_list():
     if not home.get("tag"):
         raise Error("nothing installed yet; run `rt-run install`")
     tools = home.lines("tools")
-    print(f"radio_transients:{home.get('tag')}, linked in {home.get('bin-dir')}:")
+    print(f"radio_transients:{home.get('tag')}")
+    print(f"  built      {home.get('built') or 'unknown'}")
+    origin = home.get("origin")
+    if origin:  # not recorded by installs older than this
+        verb = "pulled" if origin.startswith("oras://") else "installed"
+        print(f"  {verb:10} {home.get('arrived')}, from {origin}")
+        print(f"  history    {home.path('history')}")
+    print()
+    print(f"Linked in {home.get('bin-dir')}:")
     width = max((len(t) for t in tools), default=0) + 2
     columns = max(1, shutil.get_terminal_size().columns // width)
     rows = -(-len(tools) // columns)
@@ -759,6 +785,8 @@ def cmd_uninstall():
     bin_dir, image = home.get("bin-dir"), home.get("image")
     unlink_all(bin_dir, home.script)
     for name in ("image", "tag", "bin-dir", "built", "commands", "tools", "engine"):
+        remove(home.path(name))
+    for name in ("arrived", "origin", "history"):
         remove(home.path(name))
     for path in (home.pulled, home.pending, home.script):
         remove(path)

@@ -12,6 +12,7 @@ build-test-push.yml runs rt-run for real against every image it builds.
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -303,6 +304,55 @@ def test_list_shows_the_linked_tools(full):
     result = full.tool("rt-run", "list")
     assert result.rc == 0 and "heimdall" in result.out and "nvcc" not in result.out
     assert "a name with a command" not in result.out
+
+
+WHEN = r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC"
+
+
+def history(w):
+    lines = (w.rt / "history").read_text().splitlines()
+    return [line.split("\t") for line in lines]
+
+
+def test_list_says_when_the_image_was_pulled_and_from_where(full):
+    out = full.tool("rt-run", "list").out
+    assert "  built      Monday_7_September_2026\n" in out
+    assert re.search(rf"  pulled     {WHEN}, from {re.escape(REGISTRY)}:latest\n", out)
+    assert f"  history    {full.rt / 'history'}\n" in out
+
+
+def test_history_keeps_a_line_per_install_and_update(full):
+    full.built("Monday_14_September_2026")
+    assert full.tool("rt-run", "update").rc == 0
+    rows = history(full)
+    assert [row[1] for row in rows] == ["install", "update"]
+    assert rows[0][2:] == [
+        "radio_transients:latest",
+        "built Monday_7_September_2026",
+        f"{REGISTRY}:latest",
+    ]
+    assert rows[1][3] == "built Monday_14_September_2026"
+    assert all(re.fullmatch(WHEN, row[0]) for row in rows)
+
+
+def test_an_install_from_a_file_records_the_file(w):
+    mine = w.root / "cpu.sif"
+    mine.write_text("{}")
+    assert w.rt_run("install", "cpu", "--from", mine).rc == 0
+    assert history(w)[-1][1:] == [
+        "install",
+        "radio_transients:cpu",
+        "built unknown",
+        str(mine),
+    ]
+    out = w.tool("rt-run", "list").out
+    assert re.search(rf"  installed  {WHEN}, from {re.escape(str(mine))}\n", out)
+
+
+def test_a_failed_update_leaves_no_history(full):
+    (full.state / "pull_fails").write_text("1")
+    assert full.tool("rt-run", "update").rc == 1
+    assert [row[1] for row in history(full)] == ["install"]
 
 
 def host_command(w, name):

@@ -145,6 +145,11 @@ are, so for those, name it: `rt-run install gpu --from old.sif`.
   the image runs as `rt-run COMMAND`, e.g. `rt-run python script.py`.
 - `rt-run uninstall` removes the links, and the image if `rt-run` pulled it.
 
+`rt-run list` also shows when the image was pulled, where from, and when it
+was built. Since the tags move every week, `~/.local/share/radio_transients/history`
+keeps a line for every install and update -- time, tag, build date, source --
+so you can tell which image a result was produced with.
+
 Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
 with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
 naming a path outside `$HOME`, `/tmp` and the current directory -- the value in
