@@ -161,6 +161,34 @@ already on your `PATH`, and says which of the two will run; `rt-run list` says
 the same for the `PATH` you have now. It never replaces a file it didn't make.
 On a host with no `python3`, the links say so rather than failing obscurely.
 
+### Under Slurm
+
+The links work in batch jobs as they do on a login node. On a two-GPU node
+with Slurm's cgroup device limits, each job saw only the GPU it was given --
+as GPU 0, so `-gpu_id 0` is right -- two jobs ran side by side on different
+GPUs, and `scancel` stopped the container and everything in it.
+
+    #!/bin/bash
+    #SBATCH --gres=gpu:1
+    #SBATCH --mem=8G
+    #SBATCH --time=1:00:00
+
+    heimdall -f /data/obs/x.fil -dm 0 1000 -gpu_id 0
+
+What depends on the site:
+
+- `--nv` is decided on the node a tool runs on, so CPU nodes don't get it.
+- If apptainer is a module, a job that never runs `module load apptainer`
+  still works: `rt-run` falls back to the apptainer that `install` or
+  `update` last ran with.
+- If jobs don't inherit your environment (`--export=NONE`), add the
+  `export PATH=...` line to the script, or call the links by full path.
+- A per-job `TMPDIR` outside `/tmp` is bind-mounted automatically.
+- The image is 1 to 7 G. If your home quota can't take it, set `RT_HOME` to
+  storage every node sees and that isn't purged, such as a project
+  directory, for `rt-run install`. The links find it from then on without
+  `RT_HOME` being set.
+
 ### How to use
 
 Your `$HOME` automatically gets mounted.

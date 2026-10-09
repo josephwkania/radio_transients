@@ -167,7 +167,11 @@ class World:
             if not k.startswith(("RT_", "SINGULARITY", "APPTAINER", "XDG_"))
         }
         env.update(HOME=str(self.home), PATH=self.path, STUB_DIR=str(self.state))
-        env.update({k: str(v) for k, v in extra.items()})
+        for key, value in extra.items():
+            if value is None:
+                env.pop(key, None)  # as if never set
+            else:
+                env[key] = str(value)
         return env
 
     def run(self, cmd, cwd=None, **env):
@@ -396,6 +400,12 @@ def test_a_command_the_image_lacks_is_refused_up_front(full):
     assert result.rc == 1 and "not in the installed latest image" in result.out
 
 
+def test_the_drivers_tools_are_not_checked(full):
+    """--nv mounts the host's nvidia-smi into the image at run time."""
+    result = full.tool("rt-run", "nvidia-smi", "-L", RT_NV=1)
+    assert result.rc == 0 and "nvidia-smi" in result.lines()
+
+
 def test_a_command_given_by_path_is_not_checked(full):
     assert full.tool("rt-run", "/usr/local/bin/heimdall").rc == 0
 
@@ -466,7 +476,64 @@ def test_rt_nv_overrides(full):
 def test_rt_debug_prints_the_command_instead(full):
     result = full.tool("heimdall", "-f", "x.fil", RT_DEBUG=1)
     assert len(result.lines()) == 1
-    assert result.out.startswith("apptainer exec") and "heimdall -f x.fil" in result.out
+    assert result.out.startswith(f"{full.root}/stub/apptainer exec")
+    assert "heimdall -f x.fil" in result.out
+
+
+def python_only_path(w):
+    """A PATH with python3 on it, for the links, and no container runtime."""
+    directory = w.root / "python-only"
+    directory.mkdir()
+    (directory / "python3").symlink_to(sys.executable)
+    return directory
+
+
+def test_the_runtime_install_found_is_used_when_not_on_path(full):
+    """As in a job script that never ran `module load apptainer`."""
+    assert (full.rt / "engine").read_text().strip() == f"{full.root}/stub/apptainer"
+    result = full.tool("heimdall", "-f", "x.fil", PATH=python_only_path(full))
+    assert result.rc == 0, result.out
+    assert result.tail(4) == [str(full.rt / "image.sif"), "heimdall", "-f", "x.fil"]
+
+
+def test_no_runtime_anywhere_says_to_load_the_module(w):
+    result = w.rt_run("heimdall", PATH=python_only_path(w))
+    assert result.rc == 1 and "module load apptainer" in result.out
+
+
+def test_links_find_a_custom_rt_home_without_being_told(w):
+    """Install with RT_HOME set; then use the links from an environment
+    without it, as a job's may be."""
+    home = w.root / "project/rt"
+    assert w.rt_run("install", "full", RT_HOME=home).rc == 0
+    link = home / "bin/heimdall"
+    result = w.run([link, "-f", "x.fil"])
+    assert result.rc == 0, result.out
+    assert result.tail(4) == [str(home / "image.sif"), "heimdall", "-f", "x.fil"]
+    assert "radio_transients:latest" in w.run([home / "bin/rt-run", "list"]).out
+    assert not w.rt.exists()  # nothing went to the default RT_HOME
+
+
+def test_a_job_with_no_path_at_all_gets_a_standard_one(w, monkeypatch, capsys):
+    """srun --export=NONE leaves no PATH. The runtime needs one to find the
+    host's nvidia-smi for --nv; rt-run sets the one sh would assume."""
+    image = w.root / "x.sif"
+    image.write_text("{}")
+    (w.home / "engine").write_text(f"{w.root}/stub/apptainer\n")
+    monkeypatch.delenv("PATH")
+    for key, value in (("RT_HOME", w.home), ("RT_SIF", image), ("RT_DEBUG", 1)):
+        monkeypatch.setenv(key, str(value))
+    assert rt_run.cmd_run("heimdall", ["-h"]) == 0
+    assert os.environ["PATH"] == rt_run.DEFAULT_PATH
+    assert capsys.readouterr().out.rstrip().endswith("heimdall -h")
+
+
+def test_tmpdir_is_bound(full):
+    """Slurm may point TMPDIR at a job's own disk, outside /tmp."""
+    job_tmp = full.root / "job-tmp"
+    job_tmp.mkdir()
+    assert full.tool("heimdall", TMPDIR=job_tmp).binds() == [str(job_tmp)]
+    assert full.tool("heimdall", TMPDIR="/tmp").binds() == []
 
 
 def test_rt_sif_runs_another_image_unchecked(full):

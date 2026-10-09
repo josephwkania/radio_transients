@@ -115,6 +115,7 @@ class Home:
     commands  everything on the image's PATH, one per line
     tools     the commands that got a link
     rt-run    the copy of this file every link points at
+    engine    the apptainer or singularity install and update ran with
     """
 
     def __init__(self, root):
@@ -127,6 +128,14 @@ class Home:
     def from_env(cls):
         if os.environ.get("RT_HOME"):
             return cls(os.path.abspath(os.environ["RT_HOME"]))
+        # Run through a link, this file is RT_HOME/rt-run, so it knows its
+        # home even where RT_HOME isn't set -- a job's environment, say.
+        me = os.path.realpath(__file__)
+        here = os.path.dirname(me)
+        if os.path.basename(me) == "rt-run" and os.path.isfile(
+            os.path.join(here, "tag")
+        ):
+            return cls(here)
         data = os.environ.get("XDG_DATA_HOME") or os.path.join(
             os.path.expanduser("~"), ".local", "share"
         )
@@ -171,11 +180,21 @@ def own_image():
     return None
 
 
-def find_engine():
+def find_engine(home=None):
+    """The full path of apptainer or singularity: from PATH, or else the one
+    install or update last ran with. On a cluster the runtime is often a
+    module, on PATH only once loaded -- which a job script may not do."""
     for name in ("apptainer", "singularity"):
-        if shutil.which(name):
-            return name
-    raise Error("neither apptainer nor singularity is installed")
+        path = shutil.which(name)
+        if path:
+            return path
+    recorded = home.get("engine") if home else ""
+    if recorded and os.access(recorded, os.X_OK):
+        return recorded
+    raise Error(
+        "neither apptainer nor singularity is on PATH; on a cluster, "
+        "`module load apptainer` (or singularity) first"
+    )
 
 
 def capture(cmd):
@@ -623,13 +642,13 @@ def activate(home, image, tag, bin_dir, found):
         print("Appending, as here, keeps any host command of the same name first.")
 
 
-def image_source(inside, source):
+def image_source(home, inside, source):
     """The engine to run images with, and the existing image to install, if
     any. Inside an image there is no engine, and the image is that one."""
     if not inside:
         if source and not os.path.isfile(source):
             raise Error(f"no such image: {source}")
-        return find_engine(), source
+        return find_engine(home), source
     if source:
         raise UsageError(
             "inside an image, install uses that image; drop --from",
@@ -657,7 +676,7 @@ def cmd_install(argv):
 
     home = Home.from_env()
     inside = own_image()
-    engine, source = image_source(inside, opts.source)
+    engine, source = image_source(home, inside, opts.source)
 
     tag = ""
     if opts.variant:
@@ -690,6 +709,8 @@ def cmd_install(argv):
             check_arch(tag)
         install_script(home, engine, image, found)
         activate(home, image, tag, bin_dir, found)
+    if engine:
+        home.put("engine", engine)
     return 0
 
 
@@ -700,13 +721,14 @@ def cmd_update():
     tag = home.get("tag")
     if not tag:
         raise Error("nothing installed yet; run `rt-run install`")
-    engine = find_engine()
+    engine = find_engine(home)
     before = home.get("built")
     with cleanup_on_failure(home):
         image = pull(engine, tag, home.pending)
         found = scan_image(engine, image)
         install_script(home, engine, image, found)
         activate(home, image, tag, home.get("bin-dir"), found)
+    home.put("engine", engine)
     if before and before == found.get("built"):
         print("(The image was already up to date.)")
     return 0
@@ -736,7 +758,7 @@ def cmd_uninstall():
         raise Error(f"nothing installed at {home.root}")
     bin_dir, image = home.get("bin-dir"), home.get("image")
     unlink_all(bin_dir, home.script)
-    for name in ("image", "tag", "bin-dir", "built", "commands", "tools"):
+    for name in ("image", "tag", "bin-dir", "built", "commands", "tools", "engine"):
         remove(home.path(name))
     for path in (home.pulled, home.pending, home.script):
         remove(path)
@@ -827,12 +849,22 @@ class Binds:
         return out
 
 
+# What sh assumes when PATH is unset.
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
 def cmd_run(tool, args):
     if own_image():
         os.execvp(tool, [tool] + args)  # already in the image
 
-    engine = find_engine()
+    # A Slurm job started with --export=NONE has no PATH at all, and without
+    # one the runtime can't find the host's nvidia-smi to mount for --nv, nor
+    # apptainer some of its own helpers.
+    if not os.environ.get("PATH"):
+        os.environ["PATH"] = DEFAULT_PATH
+
     home = Home.from_env()
+    engine = find_engine(home)
     sif, tag = os.environ.get("RT_SIF"), ""
     if sif:
         if not os.path.isfile(sif):
@@ -844,13 +876,19 @@ def cmd_run(tool, args):
         if not os.path.isfile(sif):
             raise Error(f"the installed image {sif} is gone; run `rt-run update`")
         commands = home.lines("commands")
-        if "/" not in tool and commands and tool not in commands:
+        # --nv brings the host's nvidia-smi and the like in at run time, so
+        # the image's own list of commands never has them.
+        driver_tool = tool.startswith("nvidia-")
+        if "/" not in tool and commands and tool not in commands and not driver_tool:
             raise Error(
                 f"'{tool}' is not in the installed {tag} image. `rt-run list` "
                 "shows what is; `rt-run install full` has every tool."
             )
 
     binds = Binds()
+    # A scheduler may point TMPDIR at a job's own local disk, which tools
+    # then write to without it ever appearing among their arguments.
+    binds.consider(os.environ.get("TMPDIR", ""))
     for arg in args:
         binds.consider(arg)
         if arg.startswith("-") and "=" in arg:
