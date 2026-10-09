@@ -5,15 +5,23 @@ name: build, test, push
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'Singularity*'
+      # rt-run is installed into every image.
+      - 'src/**'
+      - 'pyproject.toml'
       - 'tests/**'
+      # Tests rt-run alone, with no image; rt-run.yml runs it in a minute.
+      - '!tests/test_rt_run.py'
       - '.github/workflows/build-test-push.yml'
   pull_request:
     paths:
       - 'Singularity*'
+      - 'src/**'
+      - 'pyproject.toml'
       - 'tests/**'
+      - '!tests/test_rt_run.py'
   schedule:
     # Weekly rebuild, so upstream breakage surfaces on a Monday rather than
     # the morning someone needs the container.
@@ -47,7 +55,9 @@ jobs:
             black==26.5.1 \
             flake8==7.3.0 \
             pylint==4.0.8 \
-            numpy
+            numpy \
+            pytest \
+            .
 
       # Each tool reads its own config from tests/ -- no flags here, so what
       # CI enforces is exactly what runs locally.
@@ -200,6 +210,44 @@ jobs:
             bash /tests/container_test.sh \
               --variant ${{ matrix.variant == 'latest' && 'full' || matrix.variant }} \
             | tee test-results-${{ matrix.tag }}.tap
+
+      # The ways to run the image from outside it. `run IMAGE CMD` must pass
+      # CMD its arguments. rt-run must install from the image alone, with the
+      # `install` app; must install from the host, reading the variant from
+      # the image's RT_TAG label; and must bind-mount a directory outside
+      # $HOME, /tmp and $PWD, which only it makes visible.
+      - name: Test runscript and rt-run
+        env:
+          SIF: radio_transients_${{ matrix.tag }}.sif
+          VARIANT: ${{ matrix.variant }}
+          TAG: ${{ matrix.tag }}
+          RT_HOME: ${{ runner.temp }}/rt
+        run: |
+          set -x
+          prefix=$(apptainer run "$SIF" python -c 'import sys; print(sys.prefix)')
+          [ "$prefix" = /usr/local/miniconda/envs/RT ]
+          if [ "$VARIANT" = latest ]; then
+            # The full image's default is your_heimdall.py, options and all.
+            apptainer run "$SIF" --help | grep -q your_heimdall
+          else
+            # With no command, the others open a shell.
+            env=$(echo 'echo "$CONDA_DEFAULT_ENV"' | apptainer run "$SIF")
+            [ "$env" = RT ]
+          fi
+
+          apptainer run --app install "$SIF"
+          [ "$(cat "$RT_HOME/tag")" = "$TAG" ]
+          "$RT_HOME/bin/rt-run" list
+          "$RT_HOME/bin/rt-run" uninstall
+
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-cache-dir .
+          "$RUNNER_TEMP/venv/bin/rt-run" install --from "$SIF"
+          [ "$(cat "$RT_HOME/tag")" = "$TAG" ]
+          sudo mkdir /rt-data
+          sudo chown "$USER" /rt-data
+          "$RT_HOME/bin/rt-run" python tests/make_filterbank.py /rt-data/x.fil
+          "$RT_HOME/bin/your_header.py" -f /rt-data/x.fil
 
       - name: Upload test results
         if: always()

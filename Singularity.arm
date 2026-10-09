@@ -2,6 +2,12 @@ BootStrap: docker
 From: arm64v8/ubuntu:22.04
 
 
+%files
+    pyproject.toml /opt/rt-run/pyproject.toml
+    README.md /opt/rt-run/README.md
+    LICENSE /opt/rt-run/LICENSE
+    src/rt_run.py /opt/rt-run/src/rt_run.py
+
 %post
     echo "Installing packages needed for multiple programs"
     apt-get -y update
@@ -196,6 +202,17 @@ From: arm64v8/ubuntu:22.04
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own,
     conda clean --all
 
+    # rt-run, the host-side launcher, which %files copied in -- from paths
+    # relative to where `singularity build` runs, so build from the repo's
+    # root. Here so that `singularity run --app install IMAGE` works from the
+    # image alone, and so that `rt-run update` can take the launcher matching
+    # the image it pulled.
+    /usr/local/miniconda/envs/RT/bin/pip install --no-cache-dir /opt/rt-run
+    rm -rf /opt/rt-run
+    # The GHCR tag this build is published as: what `rt-run install --from`
+    # records, and what `rt-run update` pulls.
+    echo "RT_TAG arm" >> "$SINGULARITY_LABELS"
+
     # Nothing reads these after the build. pip's wheel cache is the big one --
     # 206 MB here, and wheels are already compressed, so it costs full size in
     # the image and on every pull.
@@ -230,8 +247,12 @@ From: arm64v8/ubuntu:22.04
 
 
 %runscript
-    exec /usr/local/miniconda/RT/bin/"$@"
-    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    # `singularity run IMAGE CMD [ARGS...]` runs CMD, found on the PATH that
+    # %environment sets up; with no arguments it opens a shell.
+    if [ "$#" -gt 0 ]; then
+        exec "$@"
+    fi
+    exec /bin/bash --noprofile --init-file /.singularity_bash
 
 
 %help
@@ -258,3 +279,13 @@ From: arm64v8/ubuntu:22.04
     Author Joseph W Kania
     Version v0.1.0
 
+
+%apphelp install
+    Put this image's tools on your PATH, on the host:
+
+        singularity run --app install IMAGE.sif [--bin-dir DIR]
+
+    Then add the directory it names to PATH. See `rt-run --help`.
+
+%apprun install
+    exec /usr/local/miniconda/envs/RT/bin/rt-run install "$@"

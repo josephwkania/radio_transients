@@ -1,0 +1,52 @@
+# rt-run, the host-side launcher for the containers. One stdlib-only module;
+# the recipes install it into every image too, from this same file.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radio-transients"
+dynamic = ["version"]
+description = "Run the radio_transients containers' tools (heimdall, PRESTO, your, ...) from the host"
+readme = "README.md"
+# A table rather than an SPDX string: the string form needs a setuptools that
+# no longer installs on python 3.8, which `pip install git+...` builds with.
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "Joseph W Kania" }]
+requires-python = ">=3.8"
+classifiers = [
+    "Environment :: Console",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+[project.urls]
+Homepage = "https://github.com/josephwkania/radio_transients"
+
+[project.scripts]
+rt-run = "rt_run:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["rt_run"]
+
+[tool.setuptools.dynamic]
+version = { attr = "rt_run.__version__" }
+
+[tool.black]
+target-version = ["py38"]
+
+[tool.pylint.main]
+# The tests have their own .pylintrc, in tests/.
+ignore-paths = ["tests/"]
+
+[tool.pylint."messages control"]
+disable = [
+    # The usage text and docstrings say what each command does.
+    "missing-function-docstring",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/test_rt_run.py"]

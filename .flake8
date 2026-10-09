@@ -1,0 +1,5 @@
+[flake8]
+# Same as tests/.flake8, for src/.
+max-line-length = 88
+max-complexity = 12
+exclude = __pycache__,tests

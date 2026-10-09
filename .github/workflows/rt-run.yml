@@ -1,0 +1,109 @@
+name: rt-run
+
+# Lints, tests and builds rt-run, the host-side launcher (src/rt_run.py),
+# against a stub runtime: no apptainer and no image, so it takes a minute
+# and runs on its own rather than waiting on a container build.
+# build-test-push.yml runs rt-run for real against every image it builds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - '.flake8'
+      - 'tests/test_rt_run.py'
+      - '.github/workflows/rt-run.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - '.flake8'
+      - 'tests/test_rt_run.py'
+      - '.github/workflows/rt-run.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Same pins as the lint job in build-test-push.yml. Each tool reads its
+      # config from the repo -- .flake8, and pyproject.toml for black and
+      # pylint -- so running them by hand gives the same answer.
+      - name: Install linters
+        run: |
+          pip install --no-cache-dir \
+            black==26.5.1 \
+            flake8==7.3.0 \
+            pylint==4.0.8
+
+      - name: black
+        run: black --check --diff src/ tests/test_rt_run.py
+
+      - name: flake8
+        run: flake8 src/
+
+      - name: pylint
+        run: pylint src/rt_run.py
+
+  test:
+    name: test (python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest python pyproject.toml allows -- what a login node may
+          # have -- and the newest.
+          - python: '3.8'
+            os: ubuntu-22.04
+          - python: '3.13'
+            os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: pip install --no-cache-dir . pytest
+
+      - name: Test
+        run: pytest -v tests/test_rt_run.py
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build
+        run: |
+          pip install --no-cache-dir build
+          python -m build
+
+      # What `pip install radio-transients` will give people.
+      - name: Install the wheel
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/*.whl
+          /tmp/wheel-env/bin/rt-run --version
+          /tmp/wheel-env/bin/rt-run --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

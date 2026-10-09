@@ -86,3 +86,7 @@ back at S/N ~100 at DM 100 and nothing above S/N 8 at DM 0, 50 or 150.
   unavailable, ground truth for the GPU suite
 - `check_heimdall_cands.py` — parses Heimdall `.cand` files and asserts the
   injected pulses were recovered
+- `test_rt_run.py` — pytest suite for `rt-run` (`../src/rt_run.py`), against
+  a stub `apptainer`: which tools get linked, what gets bind-mounted, `--nv`,
+  install from an image, update and uninstall. Needs no container, so
+  `rt-run.yml` runs it on every change to `rt-run`

@@ -1,0 +1,49 @@
+name: publish rt-run to PyPI
+
+# Uploads rt-run to PyPI, as `radio-transients`, when a GitHub release is
+# published. It uses PyPI's trusted publishing, so no token is stored here --
+# and it does nothing useful until, once, by hand:
+#
+#   1. on pypi.org, a pending trusted publisher is added for project
+#      `radio-transients`: this repository, workflow `pypi.yml`, environment
+#      `pypi` (https://docs.pypi.org/trusted-publishers/), and
+#   2. in this repository's settings, an environment named `pypi` exists.
+#
+# Bump __version__ in src/rt_run.py first; the release's tag must match it.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the tag matches the version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c 'import sys; sys.path.insert(0, "src"); import rt_run; print(rt_run.__version__)')
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "release tag $TAG does not match rt_run.__version__ $version" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: |
+          pip install --no-cache-dir build
+          python -m build
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

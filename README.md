@@ -108,6 +108,59 @@ Any driver from 525 up runs either image, so 11.8 is the safe default. 12.9
 would add Blackwell support and ~1.5 G per image with it; CUDA 13 does not
 build, as dedisp does not compile against its Thrust.
 
+### Running the tools from the host
+
+`rt-run` puts the container's tools on your `PATH`, so `heimdall ...` works
+without a `singularity exec` line, and it bind-mounts the directories your
+arguments name. It needs `python3` (3.8 or newer) on the host, and nothing
+else.
+
+Install it with pip, then let it pull an image:
+
+    pipx install git+https://github.com/josephwkania/radio_transients    # or pip install --user
+    rt-run install gpu    # or full, cpu, arm, full-cuda12.6, gpu-cuda12.6
+
+Or, with an image you already have, let the image install it:
+
+    singularity run --app install radio_transients_gpu.sif
+
+Either way, then:
+
+    export PATH="$PATH:$HOME/.local/share/radio_transients/bin"    # and in ~/.bashrc
+
+    heimdall -f /data/obs/x.fil -dm 0 1000
+    your_header.py -f /data/obs/x.fil
+
+With no variant, `rt-run install` picks arm on aarch64, full when `nvidia-smi`
+is found, and cpu otherwise. `rt-run install --from radio_transients_gpu.sif`
+installs an image you have from the host side. Images built before `rt-run`
+existed have neither the `install` app nor the label saying which variant they
+are, so for those, name it: `rt-run install gpu --from old.sif`.
+
+- `rt-run update` pulls the image again; the tags are rebuilt every week. It
+  also takes the copy of `rt-run` inside the new image when that is at least as
+  new as yours, so the launcher keeps pace with the images by itself.
+- `rt-run list` shows the tools it linked: the programs the recipes build, and
+  the scripts of the Python packages they install from source. Anything else in
+  the image runs as `rt-run COMMAND`, e.g. `rt-run python script.py`.
+- `rt-run uninstall` removes the links, and the image if `rt-run` pulled it.
+
+Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
+with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
+naming a path outside `$HOME`, `/tmp` and the current directory -- the value in
+`--opt=/path` included -- has its directory bind-mounted at the same place, so
+paths mean the same inside and out. Paths under the container's own system
+directories (`/usr`, `/etc`, `/opt`, ...) are never bound over them. A path it
+can't see, such as one inside a config file, needs `RT_BIND=/data,/scratch`.
+`RT_DEBUG=1` prints the command instead of running it; `rt-run --help` and the
+top of `src/rt_run.py` list the other settings.
+
+Appending to `PATH`, as above, keeps any host command of the same name ahead
+of the container's. `install` names any tool that shares a name with a command
+already on your `PATH`, and says which of the two will run; `rt-run list` says
+the same for the `PATH` you have now. It never replaces a file it didn't make.
+On a host with no `python3`, the links say so rather than failing obscurely.
+
 ### How to use
 
 Your `$HOME` automatically gets mounted.
@@ -120,6 +173,11 @@ will mount `/data` to `/mnt`, give you GPU access, and drop you into the interac
 
 `singularity exec --nv -B /data:/mnt radio_transients_gpu.sif your_heimdall.py -f /mnt/data.fil` 
 will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
+
+`singularity run IMAGE COMMAND ...` does the same as `exec`. With no command,
+it opens a shell -- except in the full `radio_transients` image, where it runs
+`your_heimdall.py`, so `singularity run radio_transients.sif -f /mnt/data.fil`
+works too.
 
 All the Python scripts are installed in a Conda environment `RT`, this environment is automatically loaded.
 
@@ -172,6 +230,9 @@ Skips are expected: a variant is not asked for tools it does not ship, and the
 GPU-less suite skips assertions that need real hardware. The arm figures come
 from a native aarch64 build.
 
+`test_rt_run.py` tests `rt-run` itself, against a stub runtime, so it needs
+neither Singularity nor an image: `pip install . pytest && pytest`.
+
 `tests/README.md` explains what each layer catches and why, including the
 checks that exist specifically to catch a passing-but-wrong result -- such as
 the negative control that fails a dedisperser which ignores its DM argument.
@@ -181,6 +242,11 @@ the negative control that fails a dedisperser which ignores its DM argument.
 `.github/workflows/build-test-push.yml` builds all four variants on every push
 that touches a recipe or the tests, runs `container_test.sh` against each, and
 pushes to GHCR only if the tests pass -- an image that fails is never tagged.
+The tests include `singularity run`, and installing `rt-run` from the image
+just built, both with its `install` app and from the host. `rt-run.yml` lints,
+tests and builds `rt-run` on its own, in a minute, when only it changes.
+`pypi.yml` publishes it to PyPI when a GitHub release is published, once PyPI
+trusts this repository -- its header says how to set that up.
 `gpu-test.yml` runs the GPU suite on a self-hosted runner with a real card.
 
 A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
