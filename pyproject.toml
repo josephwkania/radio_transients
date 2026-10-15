@@ -45,7 +45,7 @@ ignore-paths = ["tests/"]
 [tool.pylint.format]
 # rt_run is one file on purpose: it is what every link runs, what each image
 # carries, and what `update` copies from an image to the host.
-max-module-lines = 1300
+max-module-lines = 1500
 
 [tool.pylint."messages control"]
 disable = [

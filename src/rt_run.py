@@ -28,6 +28,7 @@ Environment:
               nvidia-smi is found)
     RT_BIND   extra comma-separated bind specs, e.g. /data,/scratch:/mnt
     RT_DEBUG  print the command instead of running it
+    RT_AUTOBIND  0 mounts nothing on its own, only what RT_BIND names
     RT_REGISTRY_API  the registry's API (default: https://ghcr.io); the
               tests point it at a fake one
     RT_MOUNTINFO  the mount table to read (default: /proc/self/mountinfo);
@@ -39,11 +40,14 @@ has, and scan() also runs on the python inside the images.
 
 import argparse
 import contextlib
+import fcntl
 import fnmatch
+import grp
 import inspect
 import json
 import os
 import platform
+import pwd
 import re
 import shlex
 import shutil
@@ -57,6 +61,10 @@ REGISTRY = "oras://ghcr.io/josephwkania/radio_transients"
 REPOSITORY = "josephwkania/radio_transients"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+# Marks RT_HOME as rt-run's own, so a mistyped RT_HOME can't have rt-run
+# writing among your files, or `uninstall` deleting any that share its names.
+MARKER = ".rt-run-home"
 
 # What users type, mapped to the GHCR tag. The tags themselves work too.
 VARIANTS = {
@@ -176,13 +184,94 @@ class Home:
         write_atomically(self.path(name), text)
 
 
-def write_atomically(path, text, mode=None):
+def write_atomically(path, text, mode=0o644):
+    # An explicit mode, not the umask's: under umask 002, common for project
+    # groups, files would come out group-writable, and check_private()
+    # would rightly refuse them.
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         handle.write(text)
-    if mode is not None:
-        os.chmod(tmp, mode)
+    os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+def private_group(gid):
+    """Whether you are all there is to group gid: a user private group, as
+    Ubuntu and Red Hat give each user, where the usual umask 002 makes
+    files group-writable without letting anyone else in."""
+    try:
+        group = grp.getgrgid(gid)
+        me = pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        return False
+    return group.gr_name == me and set(group.gr_mem) <= {me}
+
+
+def others_can_change(path):
+    """Why someone other than you could change path, or "" if no one can."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return ""
+    if info.st_uid not in (os.getuid(), 0):  # yours, or an admin's
+        return f"{path} belongs to someone else"
+    shared = info.st_mode & 0o020 and not private_group(info.st_gid)
+    if info.st_mode & 0o002 or shared:
+        return f"{path} is writable by others: chmod go-w {shlex.quote(path)}"
+    return ""
+
+
+def check_private(paths):
+    """Refuse what someone else could change. Anyone able to edit rt-run's
+    copy, its state, its links or the image can run code as you -- and
+    shared project storage, a natural place for a big image, is often
+    group-writable."""
+    problems = [p for p in (others_can_change(x) for x in paths if x) if p]
+    if problems:
+        raise Error(
+            "refusing to go on, as someone else could change what runs as you:\n  "
+            + "\n  ".join(problems)
+        )
+
+
+def claim(home):
+    """Make RT_HOME rt-run's own, refusing a directory that holds other
+    things. An install from before the marker existed counts as ours."""
+    os.makedirs(home.root, mode=0o755, exist_ok=True)
+    marker = home.path(MARKER)
+    if os.path.exists(marker):
+        return
+    earlier = os.path.isfile(home.path("tag")) and os.path.isfile(home.script)
+    if os.listdir(home.root) and not earlier:
+        raise Error(
+            f"{home.root} already holds other files; RT_HOME needs a "
+            "directory of its own"
+        )
+    write_atomically(marker, "This directory belongs to rt-run (radio_transients).\n")
+
+
+def is_claimed(home):
+    earlier = os.path.isfile(home.path("tag")) and os.path.isfile(home.script)
+    return os.path.exists(home.path(MARKER)) or earlier
+
+
+@contextlib.contextmanager
+def locked(home):
+    """One install, update or uninstall at a time in an RT_HOME: two at
+    once could interleave and leave a half-made install."""
+    path = home.path(".lock")
+    with open(path, "a", encoding="utf-8") as handle:
+        os.chmod(path, 0o644)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(
+                "rt-run: waiting for another install, update or uninstall here",
+                file=sys.stderr,
+                flush=True,
+            )
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
 
 
 def remove(path):
@@ -235,7 +324,7 @@ def scan(labels_file="/.singularity.d/labels.json", dists=None):
 
     Runs inside the image: the host sends the image's python the source of
     this and of the other functions in SCAN, so they may use only the
-    standard library, and only json and os at module level.
+    standard library, and only json, os and re at module level.
 
     commands     [dir, name, kind] for every executable on PATH, in PATH
                  order; kind is "x" for a program (an ELF binary or a #!
@@ -245,9 +334,11 @@ def scan(labels_file="/.singularity.d/labels.json", dists=None):
                  dependencies
     tag, built   the image's RT_TAG and build-date labels
     self         [path, version] of the rt_run module in the image, if any
+    top          the image's own top-level directories, never mounted over
     """
     labels = read_labels(labels_file)
     return {
+        "top": image_top_dirs(mount_points("/proc/self/mountinfo")),
         "commands": executables(),
         "from_source": installed_from_source(dists),
         "tag": labels.get("RT_TAG", ""),
@@ -325,8 +416,50 @@ def this_module():
         return None
 
 
+def mount_points(mountinfo):
+    """Where filesystems are mounted, from the kernel's table."""
+    points = set()
+    try:
+        with open(mountinfo, encoding="utf-8", errors="surrogateescape") as handle:
+            for line in handle:
+                fields = line.split()
+                if len(fields) > 4:
+                    # Spaces and the like come octal-escaped: \040.
+                    points.add(
+                        re.sub(
+                            r"\\([0-7]{3})",
+                            lambda m: chr(int(m.group(1), 8)),
+                            fields[4],
+                        )
+                    )
+    except OSError:
+        pass
+    return points
+
+
+def image_top_dirs(points, root="/"):
+    """The image's own top-level directories, such as /fetch: those with
+    something in them and nothing mounted on or in them -- unlike /home or
+    the working directory's, which Singularity makes and mounts over."""
+    found = []
+    for name in sorted(os.listdir(root)):
+        path = os.path.join(root, name)
+        if os.path.islink(path) or not os.path.isdir(path):
+            continue
+        try:
+            empty = not os.listdir(path)
+        except OSError:
+            continue
+        if empty or any(p == path or p.startswith(path + "/") for p in points):
+            continue
+        found.append("/" + name)
+    return found
+
+
 SCAN = (
     scan,
+    image_top_dirs,
+    mount_points,
     executables,
     kind_of,
     installed_from_source,
@@ -337,7 +470,7 @@ SCAN = (
 
 
 def scan_image(engine, sif):
-    code = "import json\nimport os\n\n"
+    code = "import json\nimport os\nimport re\n\n"
     code += "\n".join(inspect.getsource(f) for f in SCAN)
     code += "\nprint(json.dumps(scan()))\n"
     # -I: nothing from the host's cwd or PYTHON* variables leaks into the scan.
@@ -434,7 +567,7 @@ def unlink_all(bin_dir, target):
 def link_tools(bin_dir, tools, target):
     """Point a link per tool at target. Drop links of ours for tools the
     image no longer has; never touch a file rt-run did not make."""
-    os.makedirs(bin_dir, exist_ok=True)
+    os.makedirs(bin_dir, mode=0o755, exist_ok=True)
     wanted = set(tools)
     for name in os.listdir(bin_dir):
         path = os.path.join(bin_dir, name)
@@ -518,11 +651,12 @@ def place_image(home, source):
         return os.path.abspath(source)
 
 
-def resolve_digest(tag):
-    """The digest the tag points at now, or "" if the registry can't say.
+def look_up(ref):
+    """The digest and size of the image a tag or digest names, or ("", 0)
+    if the registry can't say.
 
-    Two small requests, no login: an anonymous pull token, then the tag's
-    manifest headers, which carry its digest."""
+    Two small requests, no login: an anonymous pull token, then the
+    manifest, whose headers carry the digest and whose layers the size."""
     # Imported here, not above: it brings in http and ssl, and every tool
     # run starts this module, while only install and update need them.
     import urllib.request  # pylint: disable=import-outside-toplevel
@@ -533,26 +667,47 @@ def resolve_digest(tag):
         with urllib.request.urlopen(url, timeout=30) as response:
             token = json.load(response)["token"]
         request = urllib.request.Request(
-            f"{api}/v2/{REPOSITORY}/manifests/{tag}",
-            method="HEAD",
+            f"{api}/v2/{REPOSITORY}/manifests/{ref}",
             headers={"Authorization": f"Bearer {token}", "Accept": OCI_MANIFEST},
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             digest = response.headers.get("Docker-Content-Digest", "")
-    except (OSError, ValueError, KeyError):
-        return ""
-    return digest if DIGEST.fullmatch(digest) else ""
+            layers = json.load(response).get("layers", [])
+        size = sum(int(layer.get("size", 0)) for layer in layers)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return "", 0
+    return (digest, size) if DIGEST.fullmatch(digest) else ("", 0)
 
 
-def digest_for(tag):
-    digest = resolve_digest(tag)
+def resolve_digest(tag):
+    """The digest the tag points at now, or "" if the registry can't say."""
+    return look_up(tag)[0]
+
+
+def look_up_tag(tag):
+    digest, size = look_up(tag)
     if not digest:
         print(
             "rt-run: the registry didn't say which image the tag is now; "
             "pulling by tag, with no digest to record",
             file=sys.stderr,
         )
-    return digest
+    return digest, size
+
+
+def check_space(home, size):
+    """Refuse a pull that can't fit, before it starts rather than partway.
+    An update keeps the old image until the new one is in place, so the
+    new one needs room of its own. Quotas aren't visible here: a full quota
+    still fails partway, cleanly."""
+    free = shutil.disk_usage(home.root).free
+    need = size + size // 20 + (64 << 20)
+    if size and free < need:
+        raise Error(
+            f"the image is {size / 1e9:.1f} GB, and {home.root} has "
+            f"{free / 1e9:.1f} GB free; make room, or install elsewhere with "
+            "RT_HOME"
+        )
 
 
 def pull(engine, tag, dest, digest=""):
@@ -566,6 +721,8 @@ def pull(engine, tag, dest, digest=""):
     cmd = [engine, "pull", "--disable-cache", dest, ref]
     if subprocess.run(cmd, check=False).returncode != 0:
         raise Error(f"could not pull {ref}")
+    # Whatever the umask made it, nobody else gets to write to it.
+    os.chmod(dest, os.stat(dest).st_mode & ~0o022)
     return dest
 
 
@@ -671,6 +828,7 @@ def activate(home, image, tag, bin_dir, found):
     home.put("built", found.get("built", ""))
     home.put("commands", "".join(c + "\n" for c in commands))
     home.put("tools", "".join(t + "\n" for t in tools))
+    home.put("top", "".join(t + "\n" for t in found.get("top", [])))
     linked, skipped = link_tools(bin_dir, tools, home.script)
 
     for path in skipped:
@@ -729,7 +887,10 @@ def record(home, action, origin, digest=""):
     home.put("digest", digest)
     fields = [when, action, f"radio_transients:{home.get('tag')}"]
     fields += [f"built {home.get('built') or 'unknown'}", origin, digest or "-"]
-    with open(home.path("history"), "a", encoding="utf-8") as handle:
+    # A mode of its own, as for write_atomically(): not the umask's.
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    descriptor = os.open(home.path("history"), flags, 0o644)
+    with open(descriptor, "a", encoding="utf-8") as handle:
         handle.write("\t".join(fields) + "\n")
 
 
@@ -776,24 +937,41 @@ def cmd_install(argv):
     opts = parser.parse_args(argv)
 
     home = Home.from_env()
-    inside = own_image()
-    engine, source = image_source(home, inside, opts.source)
+    engine, source = image_source(home, own_image(), opts.source)
 
     tag = requested_tag(opts, source)
     if tag:
         check_arch(tag)
 
-    os.makedirs(home.root, exist_ok=True)
     bin_dir = os.path.abspath(
         opts.bin_dir or home.get("bin-dir") or home.path("bin")
     )  # a reinstall keeps the bin dir an earlier --bin-dir chose
+    check_private([home.root, bin_dir, source])
+    claim(home)
+    opts.bin_dir = bin_dir
+    with locked(home):
+        return install_locked(home, opts, engine, source, tag)
+
+
+def fetch_from_registry(home, engine, tag, digest):
+    """Pull tag -- or, with a digest, that exact build -- after checking
+    there is room for it. Returns the image's path and its digest."""
+    if digest:
+        size = look_up(digest)[1]
+    else:
+        digest, size = look_up_tag(tag)
+    check_space(home, size)
+    return pull(engine, tag, home.pending, digest), digest
+
+
+def install_locked(home, opts, engine, source, tag):
+    inside, bin_dir = own_image(), opts.bin_dir
     digest = ""
     with cleanup_on_failure(home):
         if source:
             image = place_image(home, source)
         else:
-            digest = opts.digest or digest_for(tag)
-            image = pull(engine, tag, home.pending, digest)
+            image, digest = fetch_from_registry(home, engine, tag, opts.digest)
         found = scan() if inside else scan_image(engine, image)
         if not tag:
             tag = found.get("tag", "")
@@ -821,12 +999,19 @@ def cmd_update():
     if not tag:
         raise Error("nothing installed yet; run `rt-run install`")
     engine = find_engine(home)
-    digest = digest_for(tag)
+    check_private([home.root, home.get("bin-dir")])
+    with locked(home):
+        return update_locked(home, engine, tag)
+
+
+def update_locked(home, engine, tag):
+    digest, size = look_up_tag(tag)
     if digest and digest == home.get("digest") and os.path.isfile(home.get("image")):
         print(f"radio_transients:{tag} is already up to date: {digest}")
         return 0
     before = home.get("built")
     with cleanup_on_failure(home):
+        check_space(home, size)
         image = pull(engine, tag, home.pending, digest)
         found = scan_image(engine, image)
         install_script(home, engine, image, found)
@@ -876,11 +1061,18 @@ def cmd_uninstall():
     home = Home.from_env()
     if not home.get("tag"):
         raise Error(f"nothing installed at {home.root}")
+    if not is_claimed(home):
+        raise Error(f"{home.root} isn't marked as rt-run's; leaving it alone")
+    with locked(home):
+        return uninstall_locked(home)
+
+
+def uninstall_locked(home):
     bin_dir, image = home.get("bin-dir"), home.get("image")
     unlink_all(bin_dir, home.script)
     for name in ("image", "tag", "bin-dir", "built", "commands", "tools", "engine"):
         remove(home.path(name))
-    for name in ("arrived", "origin", "digest", "history"):
+    for name in ("arrived", "origin", "digest", "history", "top", MARKER, ".lock"):
         remove(home.path(name))
     for path in (home.pulled, home.pending, home.script):
         remove(path)
@@ -920,27 +1112,6 @@ def under(path, roots):
     return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots)
 
 
-def mount_points(mountinfo):
-    """Where filesystems are mounted, from the kernel's table."""
-    points = set()
-    try:
-        with open(mountinfo, encoding="utf-8", errors="surrogateescape") as handle:
-            for line in handle:
-                fields = line.split()
-                if len(fields) > 4:
-                    # Spaces and the like come octal-escaped: \040.
-                    points.add(
-                        re.sub(
-                            r"\\([0-7]{3})",
-                            lambda m: chr(int(m.group(1), 8)),
-                            fields[4],
-                        )
-                    )
-    except OSError:
-        pass
-    return points
-
-
 def filesystem_root(path, points):
     """What a bind mount for path should cover: the deepest filesystem
     mounted at or above it, or, for a path on the root filesystem, the
@@ -969,11 +1140,14 @@ class Binds:
     RT_BIND covers paths no argument names.
     """
 
-    def __init__(self, mountinfo=None):
+    def __init__(self, mountinfo=None, protected=()):
         # RT_MOUNTINFO stands in for the kernel's table in the tests.
         self.points = mount_points(
             mountinfo or os.environ.get("RT_MOUNTINFO") or "/proc/self/mountinfo"
         )
+        # Never mounted over: the container's system directories, and the
+        # image's own, such as /fetch, which install recorded.
+        self.protected = CONTAINER_OWNED + tuple(protected)
         # Paths the container sees without help.
         self.mounted = [os.path.expanduser("~"), "/tmp", "/var/tmp", "/proc", "/sys"]
         self.mounted += ["/dev"]
@@ -981,17 +1155,17 @@ class Binds:
         # $PWD spells it with symlinks kept, but only if it is current: a
         # program that changed directory may have passed on a stale one.
         cwd = [os.getcwd()]
-        pwd = os.environ.get("PWD", "")
+        spelled = os.environ.get("PWD", "")
         with contextlib.suppress(OSError):
-            if pwd and pwd != cwd[0] and os.path.samefile(pwd, cwd[0]):
-                cwd.append(pwd)
+            if spelled and spelled != cwd[0] and os.path.samefile(spelled, cwd[0]):
+                cwd.append(spelled)
         self.mounted += [d for d in cwd if d != "/"]
         self.paths = []
 
     def add(self, path):
         if path == "/" or path in self.paths:
             return
-        if under(path, self.mounted) or under(path, CONTAINER_OWNED):
+        if under(path, self.mounted) or under(path, self.protected):
             return
         self.paths.append(path)
 
@@ -1040,16 +1214,44 @@ def cmd_run(tool, args):
 
     home = Home.from_env()
     engine = find_engine(home)
-    sif, tag = os.environ.get("RT_SIF"), ""
+    sif, tag, protected = chosen_image(home, tool)
+    nv = []
+    mode = os.environ.get("RT_NV", "")
+    if mode == "1" or (
+        mode != "0" and tag not in CPU_ONLY and shutil.which("nvidia-smi")
+    ):
+        nv = ["--nv"]
+
+    binds = binds_for(args, protected)
+    cmd = [engine, "exec"] + nv + binds + [sif, tool] + list(args)
+    if os.environ.get("RT_DEBUG"):
+        print(" ".join(shlex.quote(c) for c in cmd))
+        return 0
+    os.execvp(engine, cmd)
+    return 127  # not reached
+
+
+def chosen_image(home, tool):
+    """The image to run tool in, its tag, and the directories of its own
+    that are never mounted over -- after checking nobody else could have
+    changed any of it."""
+    sif, tag, protected = os.environ.get("RT_SIF"), "", []
     if sif:
         if not os.path.isfile(sif):
             raise Error(f"image not found: {sif}")
+        check_private([sif])
     else:
         sif, tag = home.get("image"), home.get("tag")
         if not sif:
             raise Error("no image installed; run `rt-run install` (or set RT_SIF)")
         if not os.path.isfile(sif):
             raise Error(f"the installed image {sif} is gone; run `rt-run update`")
+        state = ("image", "tag", "commands", "engine", "top")
+        check_private(
+            [home.root, home.script, home.get("bin-dir"), sif]
+            + [home.path(name) for name in state]
+        )
+        protected = home.lines("top")
         commands = home.lines("commands")
         # --nv brings the host's nvidia-smi and the like in at run time, so
         # the image's own list of commands never has them.
@@ -1060,28 +1262,22 @@ def cmd_run(tool, args):
                 "shows what is; `rt-run install full` has every tool."
             )
 
-    binds = Binds()
-    # A scheduler may point TMPDIR at a job's own local disk, which tools
-    # then write to without it ever appearing among their arguments.
-    binds.consider(os.environ.get("TMPDIR", ""))
-    for arg in args:
-        binds.consider(arg)
-        if arg.startswith("-") and "=" in arg:
-            binds.consider(arg.split("=", 1)[1])
+    return sif, tag, protected
 
-    nv = []
-    mode = os.environ.get("RT_NV", "")
-    if mode == "1" or (
-        mode != "0" and tag not in CPU_ONLY and shutil.which("nvidia-smi")
-    ):
-        nv = ["--nv"]
 
-    cmd = [engine, "exec"] + nv + binds.args() + [sif, tool] + list(args)
-    if os.environ.get("RT_DEBUG"):
-        print(" ".join(shlex.quote(c) for c in cmd))
-        return 0
-    os.execvp(engine, cmd)
-    return 127  # not reached
+def binds_for(args, protected):
+    """The -B options a run needs: what its arguments and TMPDIR are on,
+    unless RT_AUTOBIND=0, and whatever RT_BIND names."""
+    binds = Binds(protected=protected)
+    if os.environ.get("RT_AUTOBIND") != "0":
+        # A scheduler may point TMPDIR at a job's own local disk, which tools
+        # then write to without it ever appearing among their arguments.
+        binds.consider(os.environ.get("TMPDIR", ""))
+        for arg in args:
+            binds.consider(arg)
+            if arg.startswith("-") and "=" in arg:
+                binds.consider(arg.split("=", 1)[1])
+    return binds.args()
 
 
 # ---------------------------------------------------------------------------

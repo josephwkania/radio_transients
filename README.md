@@ -172,7 +172,23 @@ can't see, such as one inside a config file, needs `RT_BIND=/data,/scratch`.
 top of `src/rt_run.py` list the other settings.
 
 Appending to `PATH`, as above, keeps any host command of the same name ahead
-of the container's. `install` names any tool that shares a name with a command
+of the container's.
+
+Some safeguards are built in:
+
+- `rt-run` refuses to run, or install, if anyone else could change its copy,
+  its state, its links or the image -- they could then run code as you. That
+  matters when `RT_HOME` is on group-writable project storage; the message
+  says what to `chmod`. A group that is yours alone, as Ubuntu and Red Hat
+  give each user, doesn't count.
+- It won't install into a directory that already holds other files, and
+  `uninstall` only touches a directory `rt-run` has marked as its own, so a
+  mistyped `RT_HOME` can't cost you files.
+- Installs, updates and uninstalls in one `RT_HOME` take turns.
+- A pull that can't fit is refused before it starts.
+- The image's own top-level directories, such as `/fetch`, are never mounted
+  over. `RT_AUTOBIND=0` turns off automatic mounts altogether, leaving only
+  what `RT_BIND` names. `install` names any tool that shares a name with a command
 already on your `PATH`, and says which of the two will run; `rt-run list` says
 the same for the `PATH` you have now. It never replaces a file it didn't make.
 On a host with no `python3`, the links say so rather than failing obscurely.

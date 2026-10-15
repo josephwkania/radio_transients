@@ -98,6 +98,7 @@ class FakeRegistry(http.server.ThreadingHTTPServer):
     def __init__(self):
         super().__init__(("127.0.0.1", 0), RegistryHandler)
         self.builds = 0
+        self.size = 1000  # bytes in each image
         tags = set(rt_run.VARIANTS.values())
         self.digests = {tag: fake_digest(tag, 0) for tag in tags}
         # A short poll, as stop() waits out one per test.
@@ -120,22 +121,27 @@ class FakeRegistry(http.server.ThreadingHTTPServer):
 
 class RegistryHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # pylint: disable=invalid-name
+        prefix = f"/v2/{rt_run.REPOSITORY}/manifests/"
         if self.path == f"/token?scope=repository:{rt_run.REPOSITORY}:pull":
             self.answer(200, b'{"token": "t"}')
-        else:
+        elif not self.path.startswith(prefix):
             self.answer(404)
-
-    def do_HEAD(self):  # pylint: disable=invalid-name
-        prefix = f"/v2/{rt_run.REPOSITORY}/manifests/"
-        start = len(prefix)
-        tag = self.path[start:] if self.path.startswith(prefix) else ""
-        digest = self.server.digests.get(tag)
-        if self.headers.get("Authorization") != "Bearer t":
+        elif self.headers.get("Authorization") != "Bearer t":
             self.answer(401)
-        elif self.headers.get("Accept") != rt_run.OCI_MANIFEST or not digest:
-            self.answer(404)
         else:
-            self.answer(200, headers={"Docker-Content-Digest": digest})
+            start = len(prefix)
+            self.manifest(self.path[start:])
+
+    def manifest(self, ref):
+        """A tag's manifest, or a digest's: the digest in a header, the
+        image's size in its one layer."""
+        digests = self.server.digests
+        digest = digests.get(ref) or (ref if ref in digests.values() else None)
+        if self.headers.get("Accept") != rt_run.OCI_MANIFEST or not digest:
+            self.answer(404)
+            return
+        body = json.dumps({"layers": [{"size": self.server.size}]}).encode()
+        self.answer(200, body, {"Docker-Content-Digest": digest})
 
     def answer(self, code, body=b"", headers=None):
         self.send_response(code)

@@ -15,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -44,9 +45,13 @@ def world():
     if str(root).startswith(("/tmp/", "/var/tmp/")):
         shutil.rmtree(str(root))
         pytest.skip("the checkout is under /tmp, which Singularity always mounts")
+    # Files the tests make stand for a user's own: private, whatever this
+    # machine's umask. Tests of the permission checks loosen them on purpose.
+    umask = os.umask(0o022)
     registry = FakeRegistry()
     yield World(root, registry)
     registry.stop()
+    os.umask(umask)
     shutil.rmtree(str(root))
 
 
@@ -848,3 +853,142 @@ def test_mount_points_reads_the_kernels_table(tmp_path):
     )
     assert rt_run.mount_points(str(table)) == {"/", "/data/my disk"}
     assert rt_run.mount_points(str(tmp_path / "missing")) == set()
+
+
+# ---------------------------------------------------------------------------
+# Safeguards
+# ---------------------------------------------------------------------------
+
+
+def test_install_refuses_an_rt_home_others_can_write(w):
+    home = w.root / "shared/rt"
+    home.mkdir(parents=True)
+    home.chmod(0o777)
+    result = w.rt_run("install", "full", RT_HOME=home)
+    assert result.rc == 1 and f"chmod go-w {home}" in result.out
+    assert not w.pulls() and not os.listdir(home)
+
+
+def test_install_refuses_an_image_others_can_write(w):
+    mine = w.root / "cpu.sif"
+    mine.write_text("{}")
+    mine.chmod(0o666)
+    result = w.rt_run("install", "cpu", "--from", mine)
+    assert result.rc == 1 and "writable by others" in result.out
+
+
+@pytest.mark.parametrize("name", ["image.sif", "rt-run", "bin", "engine", "image"])
+def test_a_tool_wont_run_once_others_can_change_its_parts(full, name):
+    path = full.rt / name
+    path.chmod(path.stat().st_mode | 0o002)
+    result = full.tool("heimdall")
+    assert result.rc == 1 and f"chmod go-w {path}" in result.out
+    assert "exec" not in result.lines()  # never reached the runtime
+
+
+def test_a_private_group_may_write(full):
+    """umask 002 under a user private group gives no one else access."""
+    if not rt_run.private_group(os.getgid()):
+        pytest.skip("this user's group isn't private")
+    image = full.rt / "image.sif"
+    image.chmod(0o664)
+    assert full.tool("heimdall").rc == 0
+
+
+def test_rt_runs_own_files_are_private_whatever_the_umask(w):
+    old = os.umask(0o002)  # the subprocess inherits it
+    try:
+        assert w.rt_run("install", "full").rc == 0
+    finally:
+        os.umask(old)
+    for path in [w.rt, w.bin, *w.rt.iterdir()]:
+        if not path.is_symlink():
+            assert not path.stat().st_mode & 0o022, path
+    assert w.tool("heimdall").rc == 0
+
+
+def test_install_wont_use_a_directory_holding_other_files(w):
+    elsewhere = w.root / "papers"
+    elsewhere.mkdir()
+    (elsewhere / "tools").write_text("my list of tools")
+    result = w.rt_run("install", "full", RT_HOME=elsewhere)
+    assert result.rc == 1 and "directory of its own" in result.out
+    assert sorted(os.listdir(elsewhere)) == ["tools"] and not w.pulls()
+
+
+def test_uninstall_leaves_an_unmarked_directory_alone(full):
+    (full.rt / rt_run.MARKER).unlink()
+    (full.rt / "rt-run").unlink()  # nor an install from before the marker
+    result = full.rt_run("uninstall")
+    assert result.rc == 1 and "isn't marked" in result.out
+    assert (full.rt / "image.sif").exists()
+
+
+def test_an_install_from_before_the_marker_is_taken_as_ours(full):
+    (full.rt / rt_run.MARKER).unlink()
+    assert full.rt_run("install", "full").rc == 0
+    assert (full.rt / rt_run.MARKER).exists()
+
+
+def test_a_second_install_waits_for_the_first(full):
+    fcntl = rt_run.fcntl
+    with open(full.rt / ".lock", "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)  # an install already under way
+        with subprocess.Popen(
+            [sys.executable, str(RT_RUN), "install", "full"],
+            cwd=str(full.home),
+            env=full.env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        ) as waiting:
+            with pytest.raises(subprocess.TimeoutExpired):
+                waiting.wait(timeout=2)  # still blocked
+            fcntl.flock(handle, fcntl.LOCK_UN)  # the first one finishes
+            out, _ = waiting.communicate(timeout=60)
+    assert waiting.returncode == 0, out
+    assert "waiting for another install" in out
+
+
+def test_install_checks_there_is_room_first(w):
+    w.registry.size = 10**18  # an exabyte
+    result = w.rt_run("install", "full")
+    assert result.rc == 1 and "GB free" in result.out
+    assert not w.pulls()
+
+
+def test_update_checks_there_is_room_first(full):
+    full.registry.move()
+    full.registry.size = 10**18
+    result = full.tool("rt-run", "update")
+    assert result.rc == 1 and "GB free" in result.out
+    assert len(full.pulls()) == 1 and full.tool("heimdall").rc == 0
+
+
+def test_the_images_own_directories_are_never_mounted_over(full):
+    plain = full.root / "plain/obs"
+    plain.mkdir(parents=True)
+    top = "/" + plain.parts[1]  # say /home: here, it stands in for /fetch
+    if rt_run.under(top, rt_run.CONTAINER_OWNED):
+        pytest.skip(f"the checkout is under {top}, which is never mounted over")
+    (full.rt / "top").write_text(top + "\n")
+    assert full.tool("heimdall", "-f", plain / "x.fil").binds() == []
+    result = full.tool("heimdall", "-f", plain / "x.fil", RT_BIND=top)
+    assert result.binds() == [top]  # unless asked for by name
+
+
+def test_image_top_dirs(tmp_path):
+    for name in ("fetch/bin", "opt/x", "mnt", "home/me", "data/proj"):
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "environment").write_text("")  # a file, not a directory
+    mounted = {str(tmp_path / "home/me"), str(tmp_path / "data/proj")}
+    # mnt is empty; home and data hold mounts Singularity made.
+    assert rt_run.image_top_dirs(mounted, root=str(tmp_path)) == ["/fetch", "/opt"]
+
+
+def test_rt_autobind_0_mounts_only_what_rt_bind_names(full):
+    (full.root / "data/obs").mkdir(parents=True)
+    args = ("-f", full.root / "data/obs/x.fil")
+    assert full.tool("heimdall", *args, RT_AUTOBIND=0).binds() == []
+    result = full.tool("heimdall", *args, RT_AUTOBIND=0, RT_BIND="/a")
+    assert result.binds() == ["/a"]
