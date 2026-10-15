@@ -258,9 +258,11 @@ jobs:
           name: tap-${{ matrix.tag }}
           path: test-results-${{ matrix.tag }}.tap
 
-      # Only reached when the tests passed, and never on a pull request.
+      # Only reached when the tests passed, and only from main: never on a
+      # pull request, and never from "Run workflow" on another branch, which
+      # would put an untested branch's images over the published tags.
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | apptainer registry login \
             --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
