@@ -356,10 +356,13 @@ def test_a_command_given_by_path_is_not_checked(full):
 
 
 def test_binds_come_from_the_arguments(full):
+    """Each path mounts the filesystem it is on (see World.mounts)."""
     data = full.root / "data"
-    for directory in (data / "obs", data / "out", full.root / "other"):
+    for directory in (data / "obs", data / "out", data / "nested/obs"):
         directory.mkdir(parents=True)
+    (full.root / "other").mkdir()
     (data / "obs/x.fil").touch()
+    (data / "nested/obs/y.fil").touch()
     (full.home / "a.fil").touch()
     (data / "lnk").symlink_to(full.root / "other")
     result = full.tool(
@@ -378,15 +381,17 @@ def test_binds_come_from_the_arguments(full):
         "a.fil",
         "/usr/lib/x86_64-linux-gnu/out",
         "/nonexistent-top-level",
+        data / "nested/obs/y.fil",
     )
     assert sorted(result.binds()) == sorted(
         str(p)
         for p in (
-            data / "obs",  # an input file binds its directory
-            data / "out",  # --opt=DIR binds DIR
-            data,  # an output yet to be written binds its parent
-            data / "lnk",  # a path through a symlink binds the link...
-            full.root / "other",  # ...and its target
+            # data/obs/x.fil, -output_dir=data/out, data/new.cand (an output
+            # yet to be written) and data/lnk/z (through a symlink, as
+            # spelled): all on the data filesystem.
+            data,
+            full.root / "other",  # the symlink's target, on a filesystem of its own
+            data / "nested",  # a filesystem mounted inside data: the deepest wins
         )
     )
     # Not $HOME, /tmp, a path with no parent, /usr, nor / itself.
@@ -396,6 +401,16 @@ def test_binds_work_from_the_root_directory(full):
     (full.root / "data").mkdir()
     result = full.tool("heimdall", full.root / "data", cwd="/")
     assert result.binds() == [str(full.root / "data")]
+
+
+def test_a_path_on_the_root_filesystem_mounts_its_top_directory(full):
+    """No filesystem of its own: the directory under / it is in, as /data."""
+    plain = full.root / "plain/obs"
+    plain.mkdir(parents=True)
+    top = "/" + plain.parts[1]  # where this checkout is: /home, say
+    if rt_run.under(top, rt_run.CONTAINER_OWNED):
+        pytest.skip(f"the checkout is under {top}, which is never mounted over")
+    assert full.tool("heimdall", "-f", plain / "x.fil").binds() == [top]
 
 
 def test_rt_bind_adds_its_binds(full):
@@ -476,8 +491,9 @@ def test_a_job_with_no_path_at_all_gets_a_standard_one(w, monkeypatch, capsys):
 def test_tmpdir_is_bound(full):
     """Slurm may point TMPDIR at a job's own disk, outside /tmp."""
     job_tmp = full.root / "job-tmp"
-    job_tmp.mkdir()
-    assert full.tool("heimdall", TMPDIR=job_tmp).binds() == [str(job_tmp)]
+    (job_tmp / "1234").mkdir(parents=True)
+    result = full.tool("heimdall", TMPDIR=job_tmp / "1234")
+    assert result.binds() == [str(job_tmp)]  # the local disk it is on
     assert full.tool("heimdall", TMPDIR="/tmp").binds() == []
 
 
@@ -813,3 +829,22 @@ def test_the_first_directory_on_path_wins():
 def test_version_key():
     assert rt_run.version_key("0.10.0") > rt_run.version_key("0.9.1")
     assert not rt_run.version_key("garbage")
+
+
+def test_filesystem_root():
+    points = {"/", "/lustre", "/lustre/project", "/scratch"}
+    assert rt_run.filesystem_root("/lustre/project/a/b", points) == "/lustre/project"
+    assert rt_run.filesystem_root("/lustre/other", points) == "/lustre"
+    assert rt_run.filesystem_root("/scratch", points) == "/scratch"
+    assert rt_run.filesystem_root("/data/obs1", points) == "/data"  # on /
+    assert rt_run.filesystem_root("/lustrex/a", points) == "/lustrex"  # not /lustre
+
+
+def test_mount_points_reads_the_kernels_table(tmp_path):
+    table = tmp_path / "mountinfo"
+    table.write_text(
+        "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n"
+        "23 22 0:5 / /data/my\\040disk rw - nfs host:/x rw\n"
+    )
+    assert rt_run.mount_points(str(table)) == {"/", "/data/my disk"}
+    assert rt_run.mount_points(str(tmp_path / "missing")) == set()

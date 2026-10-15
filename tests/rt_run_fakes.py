@@ -184,6 +184,7 @@ class World:
         for path in (stub / "apptainer", gpu / "nvidia-smi"):
             path.chmod(0o755)
         self.listing()
+        self.mounts()
         self.built("Monday_7_September_2026")
 
     @property
@@ -208,6 +209,19 @@ class World:
         }
         (self.state / "scan.json").write_text(json.dumps(found))
 
+    def mounts(self, *extra):
+        """A mount table in /proc/self/mountinfo's format: the root
+        filesystem; data, other and job-tmp under the world's root as
+        filesystems of their own; data/nested inside data, as network
+        filesystems nest; and any extra mount points given."""
+        points = ["/"] + [str(self.root / d) for d in ("data", "other", "job-tmp")]
+        points += [str(self.root / "data/nested")] + [str(p) for p in extra]
+        lines = [
+            f"{i} 1 0:{i} / {p.replace(' ', chr(92) + '040')} rw - ext4 /dev/x{i} rw"
+            for i, p in enumerate(points, 20)
+        ]
+        (self.root / "mountinfo").write_text("\n".join(lines) + "\n")
+
     def built(self, date):
         (self.state / "built").write_text(date)
 
@@ -223,6 +237,7 @@ class World:
         }
         env.update(HOME=str(self.home), PATH=self.path, STUB_DIR=str(self.state))
         env.update(RT_REGISTRY_API=self.registry.url)
+        env.update(RT_MOUNTINFO=self.root / "mountinfo")
         for key, value in extra.items():
             if value is None:
                 env.pop(key, None)  # as if never set

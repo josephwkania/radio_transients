@@ -161,8 +161,11 @@ a result was produced with.
 Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
 with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
 naming a path outside `$HOME`, `/tmp` and the current directory -- the value in
-`--opt=/path` included -- has its directory bind-mounted at the same place, so
-paths mean the same inside and out. Paths under the container's own system
+`--opt=/path` included -- has the filesystem it is on bind-mounted at the same
+place, so paths mean the same inside and out: `/data` for `/data/obs/x.fil`,
+or `/lustre/project` if that is where a network filesystem is mounted. Tools
+can then reach the files around the ones they are given, as they would on the
+host. Paths under the container's own system
 directories (`/usr`, `/etc`, `/opt`, ...) are never bound over them. A path it
 can't see, such as one inside a config file, needs `RT_BIND=/data,/scratch`.
 `RT_DEBUG=1` prints the command instead of running it; `rt-run --help` and the

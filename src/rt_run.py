@@ -11,8 +11,9 @@ the host.
 `install` pulls an image and puts a link for each of its tools in a bin
 directory. Every link points at a copy of this file, which runs the tool with
 `apptainer exec` (or `singularity exec`). Any argument naming a host path --
-the value in --opt=/path included -- is bind-mounted at the same place in the
-container, unless Singularity mounts it already ($HOME, /tmp, $PWD).
+the value in --opt=/path included -- has the filesystem it is on bind-mounted
+at the same place in the container, unless Singularity mounts it already
+($HOME, /tmp, $PWD).
 
 The images carry this file too: `singularity run --app install IMAGE` installs
 from an image you already have, and `install` and `update` take the image's
@@ -29,6 +30,8 @@ Environment:
     RT_DEBUG  print the command instead of running it
     RT_REGISTRY_API  the registry's API (default: https://ghcr.io); the
               tests point it at a fake one
+    RT_MOUNTINFO  the mount table to read (default: /proc/self/mountinfo);
+              likewise for the tests
 
 Standard library only. The host side runs on whatever python3 a login node
 has, and scan() also runs on the python inside the images.
@@ -917,10 +920,60 @@ def under(path, roots):
     return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots)
 
 
-class Binds:
-    """The -B mounts a tool's arguments need."""
+def mount_points(mountinfo):
+    """Where filesystems are mounted, from the kernel's table."""
+    points = set()
+    try:
+        with open(mountinfo, encoding="utf-8", errors="surrogateescape") as handle:
+            for line in handle:
+                fields = line.split()
+                if len(fields) > 4:
+                    # Spaces and the like come octal-escaped: \040.
+                    points.add(
+                        re.sub(
+                            r"\\([0-7]{3})",
+                            lambda m: chr(int(m.group(1), 8)),
+                            fields[4],
+                        )
+                    )
+    except OSError:
+        pass
+    return points
 
-    def __init__(self):
+
+def filesystem_root(path, points):
+    """What a bind mount for path should cover: the deepest filesystem
+    mounted at or above it, or, for a path on the root filesystem, the
+    directory under / it is in -- /data for /data/obs1. Taking the deepest
+    mount also catches network filesystems mounted inside another, which a
+    mount of the outer one might not carry along."""
+    parts = path.strip("/").split("/")
+    for i in range(len(parts), 0, -1):
+        candidate = "/" + "/".join(parts[:i])
+        if candidate in points:
+            return candidate
+    return "/" + parts[0]
+
+
+class Binds:
+    """The -B mounts a tool's arguments need.
+
+    A path argument mounts the whole filesystem it is on (filesystem_root),
+    not just its own directory: tools reach beyond what they are given --
+    ../calibration next to an observation, files a candidate list or config
+    names, symlinked directories found walking a tree, globs a script
+    expands -- and sites configure their bind paths the same way. The cost
+    is that the container sees more of the host; it already runs as you,
+    with your home mounted. Mounting a parent of your home or working
+    directory, as /home can be, worked with SingularityCE 4.1.
+    RT_BIND covers paths no argument names.
+    """
+
+    def __init__(self, mountinfo=None):
+        # RT_MOUNTINFO stands in for the kernel's table in the tests.
+        self.points = mount_points(
+            mountinfo or os.environ.get("RT_MOUNTINFO") or "/proc/self/mountinfo"
+        )
         # Paths the container sees without help.
         self.mounted = [os.path.expanduser("~"), "/tmp", "/var/tmp", "/proc", "/sys"]
         self.mounted += ["/dev"]
@@ -953,10 +1006,13 @@ class Binds:
             directory = os.path.dirname(arg) or "/"  # an output yet to be written
         else:
             return
-        path = os.path.abspath(directory)  # as spelled, normalised
-        self.add(path)
-        # A symlink can point somewhere unmounted; its target must be there too.
-        self.add(os.path.realpath(directory))
+        # As spelled, normalised; and with symlinks resolved, as a symlink can
+        # point somewhere unmounted, and its target must be there too. What
+        # the container sees already stays as it is: widening it first would
+        # turn a file in $HOME into a mount of all of /home.
+        for path in (os.path.abspath(directory), os.path.realpath(directory)):
+            if not under(path, self.mounted):
+                self.add(filesystem_root(path, self.points))
 
     def args(self):
         out = []
