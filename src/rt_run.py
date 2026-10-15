@@ -55,7 +55,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 REGISTRY = "oras://ghcr.io/josephwkania/radio_transients"
 REPOSITORY = "josephwkania/radio_transients"

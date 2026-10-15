@@ -90,5 +90,8 @@ back at S/N ~100 at DM 100 and nothing above S/N 8 at DM 0, 50 or 150.
   a stub `apptainer`: which tools get linked, what gets bind-mounted, `--nv`,
   install from an image, update and uninstall. Needs no container, so
   `rt-run.yml` runs it on every change to `rt-run`
+- `test_recipes.py` — pytest checks on the recipes that need no build:
+  each takes its `Version` label from `rt-run` and its `Build-date` from
+  the build, rather than from `%labels`, so the images cannot disagree
 - `rt_run_fakes.py` — what `test_rt_run.py` runs `rt-run` against: a stub
   `apptainer`, a fake registry for digest lookups, and a scratch `HOME`

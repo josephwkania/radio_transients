@@ -13,8 +13,10 @@ name: publish rt-run to PyPI
 # rules on them, under Settings -> Environments, are optional.
 #
 # To release: bump __version__ in src/rt_run.py, merge that to main, and
-# publish a release tagged v<version>. Neither index ever takes a version
-# twice, so each dry run uploads <version>.dev<run number>.
+# publish a release tagged v<version>. The images' Version label is the same
+# number, so the merge also puts it on the images build-test-push.yml builds.
+# Neither index ever takes a version twice, so each dry run uploads
+# <version>.dev<run number>.
 
 on:
   release:

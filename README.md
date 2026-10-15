@@ -241,7 +241,10 @@ works too.
 
 All the Python scripts are installed in a Conda environment `RT`, this environment is automatically loaded.
 
-You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`
+You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`.
+Its `Version` label is the same in every image: the version of `rt-run`
+inside it, which is also the version on PyPI. `Build-date` is the day the
+image was built.
 
 ### Testing
 
@@ -292,6 +295,8 @@ from a native aarch64 build.
 
 `test_rt_run.py` tests `rt-run` itself, against a stub runtime, so it needs
 neither Singularity nor an image: `pip install . pytest && pytest`.
+`test_recipes.py`, run the same way, checks the recipes without building
+them.
 
 `tests/README.md` explains what each layer catches and why, including the
 checks that exist specifically to catch a passing-but-wrong result -- such as

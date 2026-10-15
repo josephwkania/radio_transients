@@ -310,6 +310,13 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # the image it pulled.
     /usr/local/miniconda/envs/RT/bin/pip install --no-cache-dir /opt/rt-run
     rm -rf /opt/rt-run
+    # One version for the whole repo, rt-run's __version__ -- the same number
+    # PyPI has -- written here rather than in %labels so the four recipes
+    # cannot drift apart. The build date is the day this ran, not a day
+    # someone typed in.
+    RT_VERSION=$(/usr/local/miniconda/envs/RT/bin/rt-run --version | cut -d' ' -f2)
+    echo "Version v$RT_VERSION" >> "$SINGULARITY_LABELS"
+    echo "Build-date $(date -u +%d-%b-%Y)" >> "$SINGULARITY_LABELS"
     # The GHCR tag this build is published as: what `rt-run install --from`
     # records, and what `rt-run update` pulls.
     case "{{ CUDA_VERSION }}" in
@@ -394,8 +401,6 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
 
 %labels
     Author Joseph W Kania
-    Version v0.2.1
-    Build-date 04-Sep-2026
 
 
 %apphelp install

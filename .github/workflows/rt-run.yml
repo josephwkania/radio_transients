@@ -14,6 +14,9 @@ on:
       - '.flake8'
       - 'tests/test_rt_run.py'
       - 'tests/rt_run_fakes.py'
+      # test_recipes.py checks the recipes' labels without building them.
+      - 'Singularity*'
+      - 'tests/test_recipes.py'
       - '.github/workflows/rt-run.yml'
   pull_request:
     paths:
@@ -22,6 +25,8 @@ on:
       - '.flake8'
       - 'tests/test_rt_run.py'
       - 'tests/rt_run_fakes.py'
+      - 'Singularity*'
+      - 'tests/test_recipes.py'
       - '.github/workflows/rt-run.yml'
   workflow_dispatch:
 
@@ -47,7 +52,7 @@ jobs:
             pylint==4.0.8
 
       - name: black
-        run: black --check --diff src/ tests/test_rt_run.py tests/rt_run_fakes.py
+        run: black --check --diff src/ tests/test_rt_run.py tests/rt_run_fakes.py tests/test_recipes.py
 
       - name: flake8
         run: flake8 src/
@@ -80,7 +85,7 @@ jobs:
         run: pip install --no-cache-dir . pytest
 
       - name: Test
-        run: pytest -v tests/test_rt_run.py
+        run: pytest -v tests/test_rt_run.py tests/test_recipes.py
 
   build:
     runs-on: ubuntu-24.04
