@@ -23,7 +23,7 @@ passed.
 | Shared libraries resolve | `ldd \| grep 'not found'` | the `apt-get purge` at the end of `%post` taking a runtime library with it |
 | Binaries start | run them, treat only loader failures as errors | `undefined symbol` from a version-mismatched library |
 | CUDA architectures | `cuobjdump --list-elf` on `libdedisp.so` and `heimdall` | a build no longer taking `all-major`, leaving dedisp on sm_30 or Heimdall on sm_52 alone |
-| Heimdall optimised | `grep -a -c raw_pointer_cast heimdall` is 0 | its CUDA host code built without `-O` (3.7× slower), as an exported `CFLAGS` once did |
+| Heimdall optimised | no `raw_pointer_cast` functions in `heimdall`'s symbol table (read with python; the image has no `nm`) | its CUDA host code built without `-O` (3.7× slower), as an exported `CFLAGS` once did |
 | Heimdall linkage | `ldd heimdall` for `libdedisp`, `libcudart`, `libpsrdada` | Heimdall built against the wrong dedisp |
 | Python imports | one interpreter, all modules | a compiled extension that built but cannot load |
 | Pinned versions | compare installed to what the recipe pins | numpy drifting to 2.x and breaking FETCH; TensorFlow moving off 2.14 and breaking CUDA 11.8; the CuPy wheel not matching the image's CUDA |

@@ -429,15 +429,41 @@ if [ "$HAS_GPU_STACK" -eq 1 ]; then
             *) fail "heimdall includes sm_80 (Ampere)" "found: ${ARCHES:-none}" ;;
         esac
         # Built without -O, the host side of Heimdall's .cu files keeps
-        # Thrust's helpers as real functions -- 25 mentions of
-        # raw_pointer_cast in the binary -- and runs about 3.7x slower.
-        # Optimised, they are inlined away. (The image has no nm, hence grep.)
-        UNINLINED=$(grep -a -c raw_pointer_cast "$HD" || true)
-        if [ "${UNINLINED:-0}" -eq 0 ]; then
+        # Thrust's helpers as real functions -- 25 of them named
+        # raw_pointer_cast -- and runs about 3.7x slower. Optimised, they are
+        # inlined away. Count them in the symbol table: grepping the binary
+        # also finds the name in the debug info, which -g keeps either way.
+        # The image has no nm, so a few lines of python read the ELF.
+        UNINLINED=$(python - "$HD" <<'PY'
+import struct
+import sys
+
+data = open(sys.argv[1], "rb").read()
+(shoff,) = struct.unpack_from("<Q", data, 0x28)
+shentsize, shnum = struct.unpack_from("<HH", data, 0x3A)
+sections = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + i * shentsize)
+            for i in range(shnum)]
+count = -1  # no symbol table: stripped
+for _, kind, _, _, offset, size, link, _, _, _ in sections:
+    if kind != 2:  # SHT_SYMTAB
+        continue
+    count = max(count, 0)
+    strings = sections[link][4]
+    for i in range(size // 24):
+        name, info = struct.unpack_from("<IB", data, offset + i * 24)
+        start = strings + name
+        if info & 0xF == 2 and b"raw_pointer_cast" in data[start:data.index(b"\0", start)]:
+            count += 1  # STT_FUNC
+print(count)
+PY
+)
+        if [ "$UNINLINED" = 0 ]; then
             pass "heimdall's CUDA host code is optimised"
+        elif [ "$UNINLINED" = -1 ]; then
+            skip "heimdall's CUDA host code is optimised" "heimdall is stripped"
         else
             fail "heimdall's CUDA host code is optimised" \
-                 "$UNINLINED mentions of raw_pointer_cast: built without -O?"
+                 "${UNINLINED:-?} raw_pointer_cast functions not inlined: built without -O?"
         fi
     fi
 
