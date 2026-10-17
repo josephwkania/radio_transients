@@ -236,6 +236,11 @@ jobs:
           version=$(apptainer exec "$SIF" /usr/local/miniconda/envs/RT/bin/rt-run --version | cut -d' ' -f2)
           apptainer inspect "$SIF" | grep -qxF "Version: v$version"
           apptainer inspect "$SIF" | grep -qE '^Build-date: [0-9]{2}-[A-Z][a-z]{2}-[0-9]{4}$'
+          # Images built for one CPU (--build-arg MARCH=...) are for their
+          # builder only; nothing CI publishes may be one.
+          if [ "$VARIANT" != gpu ]; then
+            apptainer inspect "$SIF" | grep -qx 'Build-march: none'
+          fi
           prefix=$(apptainer run "$SIF" python -c 'import sys; print(sys.prefix)')
           [ "$prefix" = /usr/local/miniconda/envs/RT ]
           if [ "$VARIANT" = latest ]; then

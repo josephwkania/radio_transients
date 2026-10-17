@@ -22,12 +22,13 @@ passed.
 | Binaries exist | `command -v` | a `make install` that silently no-oped |
 | Shared libraries resolve | `ldd \| grep 'not found'` | the `apt-get purge` at the end of `%post` taking a runtime library with it |
 | Binaries start | run them, treat only loader failures as errors | `undefined symbol` from a version-mismatched library |
-| CUDA architectures | `cuobjdump --list-elf libdedisp.so` | the `sm_30` → `all-major` rewrite no longer matching, leaving an image that only runs on Kepler |
+| CUDA architectures | `cuobjdump --list-elf` on `libdedisp.so` and `heimdall` | a build no longer taking `all-major`, leaving dedisp on sm_30 or Heimdall on sm_52 alone |
+| Heimdall optimised | `grep -a -c raw_pointer_cast heimdall` is 0 | its CUDA host code built without `-O` (3.7× slower), as an exported `CFLAGS` once did |
 | Heimdall linkage | `ldd heimdall` for `libdedisp`, `libcudart`, `libpsrdada` | Heimdall built against the wrong dedisp |
 | Python imports | one interpreter, all modules | a compiled extension that built but cannot load |
 | Pinned versions | compare installed to what the recipe pins | numpy drifting to 2.x and breaking FETCH; TensorFlow moving off 2.14 and breaking CUDA 11.8; the CuPy wheel not matching the image's CUDA |
-| Environment | `$PGPLOT_DIR`, `$TEMPO`, `$PRESTO`, `$PSRCAT_FILE` point at real files | a runtime variable set to a path that got cleaned up |
-| End-to-end | `fake` → `header` → `readfile` → `rfifind` → `prepdata` → `realfft` → `single_pulse_search.py` → `your` | tools that load fine but cannot actually process data |
+| Environment | `$PGPLOT_DIR`, `$TEMPO`, `$TEMPO2`, `$PRESTO`, `$PSRCAT_FILE` point at real files | a runtime variable set to a path that got cleaned up |
+| End-to-end | `fake` → `header` → `readfile` → `rfifind` → `prepdata` → `realfft` → `single_pulse_search.py` → `your`; `prepfold -timing` on a GBT file | tools that load fine but cannot actually process data; PRESTO's polycos, which need tempo2 |
 | psrdada | create and destroy a `/dev/shm` ring buffer | a psrdada that links but does not work — no GPU needed |
 
 ## What it cannot check
@@ -92,7 +93,9 @@ back at S/N ~100 at DM 100 and nothing above S/N 8 at DM 0, 50 or 150.
   `rt-run.yml` runs it on every change to `rt-run`
 - `test_recipes.py` — pytest checks on the recipes that need no build:
   each takes its `Version` label from `rt-run` and its `Build-date` from
-  the build, rather than from `%labels`, so the images cannot disagree
+  the build, rather than from `%labels`, so the images cannot disagree; none
+  exports compiler flags or clones over `git://`; and `MARCH` is off unless
+  a build asks for it
 - `rt_run_fakes.py` — what `test_rt_run.py` runs `rt-run` against: a stub
   `apptainer`, a stub `cosign`, a fake registry for digest lookups, and a
   scratch `HOME`

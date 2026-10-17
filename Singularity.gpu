@@ -78,10 +78,11 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     cd ~/source
     git clone https://github.com/ajameson/dedisp.git
     cd dedisp
-    sed -i 's/sm_30/all-major/g' Makefile.inc
-    make INSTALL_DIR=$HOME/software/dedisp install
+    # Makefile.inc defaults to sm_30, which CUDA 11 refuses; it takes
+    # GPU_ARCH from the command line. all-major: machine code for every major
+    # GPU generation, so one image runs on any card.
+    make GPU_ARCH=all-major INSTALL_DIR=$HOME/software/dedisp install
     cp ~/software/dedisp/lib/* /usr/local/lib
-    export LD_LIBRARY_PATH=LD_LIBRARY_PATH:~/software/dedisp
     echo "dedisp Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Building Psrdada"
@@ -89,12 +90,18 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     apt-get -y install apt-transport-https ca-certificates
     update-ca-certificates
     cd ~/source
-    export CFLAGS="-fopenmp -fPIC" # needs to be complied with fPIC for psrdada-python to work
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
     ./bootstrap
-    ./configure --prefix=$HOME/software/psrdada
-    make
+    # Given to configure, not exported. An exported CFLAGS reaches every later
+    # autoconf build in this recipe, and autoconf only adds its default
+    # `-g -O2` when CFLAGS is unset: it left psrdada and Heimdall's CUDA host
+    # code without -O. Each autoconf build below checks it got -O2.
+    ./configure --prefix=$HOME/software/psrdada CFLAGS="-g -O2 -fopenmp -fPIC"
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "psrdada lost its -O2" >&2; exit 1; }
+    # Nothing sets CUDA_NVCC_FLAGS, so nvcc would build psrdada's CUDA code for
+    # its default sm_52 alone. -O2 for the host side, as the C gets.
+    make CUDA_NVCC_FLAGS="-O2 -arch=all-major"
     make install
     cp -r ~/software/psrdada/bin/* /usr/local/bin
     cp -r ~/software/psrdada/lib/* /usr/local/lib
@@ -104,11 +111,17 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     export PATH=$PATH:/usr/local/cuda
     echo "Building Heimdall"
     cd ~/source
-    git clone git://git.code.sf.net/p/heimdall-astro/code heimdall
+    git clone https://git.code.sf.net/p/heimdall-astro/code heimdall
     cd heimdall
     ./bootstrap
     ./configure --prefix=$HOME/software/heimdall/linux_64 --with-psrdada-dir=$HOME/software/psrdada --with-dedisp-dir=$HOME/software/dedisp --with-cuda-dir=/usr/local/cuda
-    make install
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "Heimdall lost its -O2" >&2; exit 1; }
+    # Heimdall's .cu host code takes CFLAGS; its GPU code, like psrdada's,
+    # would otherwise be sm_52 only. Unoptimised host code made Heimdall
+    # about 3.7x slower; the GPU target changes S/N rounding slightly, not
+    # speed. No -march: it gains nothing here, the host side is mostly waiting
+    # on the GPU.
+    make CUDA_NVCC_FLAGS="-O2 -arch=all-major" install
     mv ~/software/heimdall/linux_64/bin/* /usr/local/bin
     echo "Heimdall Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
  
