@@ -155,8 +155,24 @@ installs that same build again, here or anywhere. `rt-run` pulls by digest
 whenever the registry will say what a tag points at, and `update` uses it to
 download nothing when the tag hasn't moved.
 `~/.local/share/radio_transients/history` keeps a line for every install and
-update -- time, tag, build date, source, digest -- so you can tell which image
-a result was produced with.
+update -- time, tag, build date, source, digest, signature check -- so you can
+tell which image a result was produced with.
+
+CI signs every image it publishes, with [cosign](https://docs.sigstore.dev/)'s
+keyless signing: the signature says the image was built by
+`build-test-push.yml` on `main`, with GitHub vouching for that, so there is
+no key to leak. When `cosign` is installed, `rt-run install` and `update`
+check that signature before pulling, in about a second, and refuse an image
+without it; the pull then checks the download against the signed digest as it
+arrives. Without `cosign` they warn and go ahead. `RT_VERIFY=require` refuses
+any image that can't be checked, including one installed `--from` a file, and
+`RT_VERIFY=0` skips the check -- needed for images published before signing
+began. `rt-run list` says how the installed image fared. To check by hand:
+
+    cosign verify \
+      --certificate-identity https://github.com/josephwkania/radio_transients/.github/workflows/build-test-push.yml@refs/heads/main \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      ghcr.io/josephwkania/radio_transients:gpu
 
 Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
 with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
@@ -186,6 +202,8 @@ Some safeguards are built in:
   mistyped `RT_HOME` can't cost you files.
 - Installs, updates and uninstalls in one `RT_HOME` take turns.
 - A pull that can't fit is refused before it starts.
+- With `cosign` installed, an image CI didn't sign is refused before it is
+  pulled (above).
 - The image's own top-level directories, such as `/fetch`, are never mounted
   over. `RT_AUTOBIND=0` turns off automatic mounts altogether, leaving only
   what `RT_BIND` names. `install` names any tool that shares a name with a command
@@ -307,6 +325,7 @@ the negative control that fails a dedisperser which ignores its DM argument.
 `.github/workflows/build-test-push.yml` builds all four variants on every push
 that touches a recipe or the tests, runs `container_test.sh` against each, and
 pushes to GHCR only if the tests pass -- an image that fails is never tagged.
+From `main`, it then signs each image it pushed with cosign.
 The tests include `singularity run`, and installing `rt-run` from the image
 just built, both with its `install` app and from the host. `rt-run.yml` lints,
 tests and builds `rt-run` on its own, in a minute, when only it changes.

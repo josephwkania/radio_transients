@@ -85,6 +85,26 @@ else:
     sys.exit(99)
 """
 
+# cosign, as rt-run runs it: `verify ... IMAGE@DIGEST`. Records each call,
+# and finds every image signed but those the "unsigned" file lists.
+COSIGN = r"""#!{python}
+import os, sys
+
+state = os.environ["STUB_DIR"]
+with open(os.path.join(state, "cosign_calls"), "a") as handle:
+    handle.write("\t".join(sys.argv[1:]) + "\n")
+try:
+    with open(os.path.join(state, "unsigned")) as handle:
+        unsigned = handle.read().split()
+except FileNotFoundError:
+    unsigned = []
+if sys.argv[-1].split("@")[-1] in unsigned:
+    print("Error: no signatures found", file=sys.stderr)
+    print("error during command execution: no signatures found", file=sys.stderr)
+    sys.exit(1)
+print('[{{"critical": {{}}}}]')
+"""
+
 
 def fake_digest(tag, build):
     return "sha256:" + hashlib.sha256(f"{tag} {build}".encode()).hexdigest()
@@ -195,8 +215,11 @@ class World:
 
     @property
     def path(self):
-        """The stub runtime first; an nvidia-smi only if this machine has one."""
-        return f"{self.root / 'stub'}:{os.environ['PATH']}"
+        """The stub runtime first; an nvidia-smi only if this machine has one.
+        No cosign but the stub, and that only once cosign() puts it there."""
+        host = os.environ["PATH"].split(os.pathsep)
+        host = [d for d in host if not os.path.exists(os.path.join(d, "cosign"))]
+        return os.pathsep.join([str(self.root / "stub")] + host)
 
     @property
     def gpu_path(self):
@@ -227,6 +250,22 @@ class World:
             for i, p in enumerate(points, 20)
         ]
         (self.root / "mountinfo").write_text("\n".join(lines) + "\n")
+
+    def cosign(self):
+        """Install the stub cosign, which finds every image signed."""
+        stub = self.root / "stub" / "cosign"
+        stub.write_text(COSIGN.format(python=sys.executable))
+        stub.chmod(0o755)
+
+    def unsign(self, digest):
+        with open(self.state / "unsigned", "a", encoding="utf-8") as handle:
+            handle.write(digest + "\n")
+
+    def cosign_calls(self):
+        path = self.state / "cosign_calls"
+        if not path.exists():
+            return []
+        return [line.split("\t") for line in path.read_text().splitlines()]
 
     def built(self, date):
         (self.state / "built").write_text(date)

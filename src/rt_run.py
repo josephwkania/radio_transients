@@ -29,6 +29,10 @@ Environment:
     RT_BIND   extra comma-separated bind specs, e.g. /data,/scratch:/mnt
     RT_DEBUG  print the command instead of running it
     RT_AUTOBIND  0 mounts nothing on its own, only what RT_BIND names
+    RT_VERIFY auto (the default) checks each image's signature with cosign
+              before pulling it, when cosign is installed; require refuses
+              an image it can't check; 0 skips the check. A bad signature
+              is refused unless it is 0
     RT_REGISTRY_API  the registry's API (default: https://ghcr.io); the
               tests point it at a fake one
     RT_MOUNTINFO  the mount table to read (default: /proc/self/mountinfo);
@@ -61,6 +65,17 @@ REGISTRY = "oras://ghcr.io/josephwkania/radio_transients"
 REPOSITORY = "josephwkania/radio_transients"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+# Who signs the images: build-test-push.yml, running on main, with cosign's
+# keyless signing -- GitHub vouches for the workflow, so there is no key to
+# keep. A signature from anywhere else, a branch or a fork, doesn't count.
+IMAGE = REGISTRY.replace("oras://", "", 1)
+SIGNER = (
+    f"https://github.com/{REPOSITORY}/.github/workflows/build-test-push.yml"
+    "@refs/heads/main"
+)
+SIGNER_ISSUER = "https://token.actions.githubusercontent.com"
+SIGNED = "signed by build-test-push.yml on main, checked with cosign"
 
 # Marks RT_HOME as rt-run's own, so a mistyped RT_HOME can't have rt-run
 # writing among your files, or `uninstall` deleting any that share its names.
@@ -104,6 +119,9 @@ inside an image, `singularity run --app install IMAGE` does the same.
 
 --digest sha256:... pulls that exact build of VARIANT, as `rt-run list` and
 the history file record it, rather than whatever its tag points at now.
+
+Each pull is checked first against the signature CI puts on every image, if
+cosign is installed. RT_VERIFY=require refuses images it can't check.
 """
 
 
@@ -140,6 +158,7 @@ class Home:
     arrived   when the image was pulled, or installed --from a file
     origin    where from: the registry and tag, or the file
     digest    the registry's sha256 for the image pulled, which pins it
+    signature whether cosign checked the image's signature, or why not
     history   a line per install and update, never rewritten: which image
               was in use when, for anyone asking what their results ran on
     """
@@ -695,6 +714,77 @@ def look_up_tag(tag):
     return digest, size
 
 
+def verify_mode():
+    mode = os.environ.get("RT_VERIFY") or "auto"
+    if mode not in ("auto", "require", "0"):
+        raise UsageError(
+            f"RT_VERIFY is '{mode}'; it takes auto, require or 0", show_usage=False
+        )
+    return mode
+
+
+def check_signature(digest):
+    """Check, before pulling it, that the image digest names was signed by
+    SIGNER, and say how it went: SIGNED, or why it went unchecked.
+
+    cosign checks the signature on the digest, and the pull then checks the
+    download against the digest as it arrives -- so the gigabytes are hashed
+    once, in passing, rather than read again afterwards. Without cosign the
+    image goes unchecked, with a warning, unless RT_VERIFY=require; a bad or
+    missing signature is refused either way, unless RT_VERIFY=0."""
+    mode = verify_mode()
+    if mode == "0":
+        return "unchecked: RT_VERIFY=0"
+    cosign = shutil.which("cosign")
+    if not digest:
+        reason = "unchecked: no digest"
+        why = "the registry didn't say which image the tag is"
+    elif not cosign:
+        reason = "unchecked: no cosign"
+        why = "cosign, which checks it, isn't installed"
+    else:
+        run_cosign(cosign, digest)
+        return SIGNED
+    if mode == "require":
+        raise Error(f"RT_VERIFY=require, but {why}, so its signature can't be checked")
+    print(f"rt-run: not checking the image's signature: {why}", file=sys.stderr)
+    if not cosign:
+        print(
+            "rt-run: install cosign to have it checked: "
+            "https://docs.sigstore.dev/cosign/system_config/installation/",
+            file=sys.stderr,
+        )
+    return reason
+
+
+def run_cosign(cosign, digest):
+    ref = f"{IMAGE}@{digest}"
+    print(f"Checking the signature on {ref}", flush=True)
+    cmd = [cosign, "verify", "--certificate-identity", SIGNER]
+    cmd += ["--certificate-oidc-issuer", SIGNER_ISSUER, ref]
+    try:
+        # Its stdout is the signature's JSON; its stderr says what failed.
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            timeout=300,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Error(f"could not check the signature with {cosign}: {error}") from error
+    if proc.returncode != 0:
+        said = (proc.stderr.strip().splitlines() or ["(no output)"])[-1]
+        raise Error(
+            f"{ref} has no valid signature from the radio_transients CI, so "
+            f"rt-run won't install it. cosign said: {said}\n"
+            "Images published before signing began have none; RT_VERIFY=0 "
+            "skips the check."
+        )
+    print(f"  {SIGNED}")
+
+
 def check_space(home, size):
     """Refuse a pull that can't fit, before it starts rather than partway.
     An update keeps the old image until the new one is in place, so the
@@ -879,14 +969,17 @@ def image_source(home, inside, source):
     return None, inside
 
 
-def record(home, action, origin, digest=""):
-    """Note when the image arrived and where from, and add it to history."""
+def record(home, action, origin, digest, signature):
+    """Note when the image arrived, where from and whether its signature was
+    checked, and add it to history."""
     when = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     home.put("arrived", when)
     home.put("origin", origin)
     home.put("digest", digest)
+    home.put("signature", signature)
     fields = [when, action, f"radio_transients:{home.get('tag')}"]
     fields += [f"built {home.get('built') or 'unknown'}", origin, digest or "-"]
+    fields += [signature]
     # A mode of its own, as for write_atomically(): not the umask's.
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
     descriptor = os.open(home.path("history"), flags, 0o644)
@@ -938,6 +1031,11 @@ def cmd_install(argv):
 
     home = Home.from_env()
     engine, source = image_source(home, own_image(), opts.source)
+    if source and verify_mode() == "require":
+        raise Error(
+            "RT_VERIFY=require, but an image from a file has no signature in "
+            "the registry to check; install it by pulling instead"
+        )
 
     tag = requested_tag(opts, source)
     if tag:
@@ -954,24 +1052,27 @@ def cmd_install(argv):
 
 
 def fetch_from_registry(home, engine, tag, digest):
-    """Pull tag -- or, with a digest, that exact build -- after checking
-    there is room for it. Returns the image's path and its digest."""
+    """Pull tag -- or, with a digest, that exact build -- after checking its
+    signature and that there is room for it. Returns the image's path, its
+    digest and how the signature check went."""
     if digest:
         size = look_up(digest)[1]
     else:
         digest, size = look_up_tag(tag)
+    signature = check_signature(digest)
     check_space(home, size)
-    return pull(engine, tag, home.pending, digest), digest
+    return pull(engine, tag, home.pending, digest), digest, signature
 
 
 def install_locked(home, opts, engine, source, tag):
     inside, bin_dir = own_image(), opts.bin_dir
-    digest = ""
+    digest, signature = "", "unchecked: local file"
     with cleanup_on_failure(home):
         if source:
             image = place_image(home, source)
         else:
-            image, digest = fetch_from_registry(home, engine, tag, opts.digest)
+            fetched = fetch_from_registry(home, engine, tag, opts.digest)
+            image, digest, signature = fetched
         found = scan() if inside else scan_image(engine, image)
         if not tag:
             tag = found.get("tag", "")
@@ -985,7 +1086,7 @@ def install_locked(home, opts, engine, source, tag):
         install_script(home, engine, image, found)
         activate(home, image, tag, bin_dir, found)
     origin = os.path.abspath(source) if source else f"{REGISTRY}:{tag}"
-    record(home, "install", origin, digest)
+    record(home, "install", origin, digest, signature)
     if engine:
         home.put("engine", engine)
     return 0
@@ -1010,13 +1111,14 @@ def update_locked(home, engine, tag):
         print(f"radio_transients:{tag} is already up to date: {digest}")
         return 0
     before = home.get("built")
+    signature = check_signature(digest)
     with cleanup_on_failure(home):
         check_space(home, size)
         image = pull(engine, tag, home.pending, digest)
         found = scan_image(engine, image)
         install_script(home, engine, image, found)
         activate(home, image, tag, home.get("bin-dir"), found)
-    record(home, "update", f"{REGISTRY}:{tag}", digest)
+    record(home, "update", f"{REGISTRY}:{tag}", digest, signature)
     home.put("engine", engine)
     if before and before == found.get("built"):
         print("(The image was already up to date.)")
@@ -1037,6 +1139,9 @@ def cmd_list():
     digest = home.get("digest")
     if digest:
         print(f"  digest     {digest}")
+    signature = home.get("signature")
+    if signature:  # likewise
+        print(f"  signature  {signature}")
     if origin:
         print(f"  history    {home.path('history')}")
     if digest:
@@ -1072,7 +1177,9 @@ def uninstall_locked(home):
     unlink_all(bin_dir, home.script)
     for name in ("image", "tag", "bin-dir", "built", "commands", "tools", "engine"):
         remove(home.path(name))
-    for name in ("arrived", "origin", "digest", "history", "top", MARKER, ".lock"):
+    for name in ("arrived", "origin", "digest", "signature", "history", "top"):
+        remove(home.path(name))
+    for name in (MARKER, ".lock"):
         remove(home.path(name))
     for path in (home.pulled, home.pending, home.script):
         remove(path)

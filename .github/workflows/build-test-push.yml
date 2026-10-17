@@ -98,6 +98,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # For cosign's keyless signing: GitHub's word that this is this
+      # workflow, running on main.
+      id-token: write
 
     strategy:
       fail-fast: false
@@ -275,3 +278,47 @@ jobs:
             --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
           apptainer push radio_transients_${{ matrix.tag }}.sif \
             oras://${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      # Keyless: the signature carries GitHub's word that build-test-push.yml
+      # on main made it, and there is no key to keep. rt-run checks it before
+      # pulling; `cosign verify` does by hand (see the README). GHCR has no
+      # referrers API, so cosign keeps it under the tag sha256-<digest>.
+      - name: Sign the image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          SIF: radio_transients_${{ matrix.tag }}.sif
+          TAG: ${{ matrix.tag }}
+          REPO: ${{ github.repository }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # apptainer push doesn't print the digest it pushed, so ask GHCR --
+          # and sign it only if its one layer is this file, not whatever
+          # another run may have pushed to the tag since.
+          token=$(curl -fsS -u "$ACTOR:$GITHUB_TOKEN" \
+            "https://ghcr.io/token?scope=repository:$REPO:pull" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])')
+          curl -fsS -D headers -o manifest.json \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/$REPO/manifests/$TAG"
+          digest=$(tr -d '\r' < headers | awk -F': ' 'tolower($1) == "docker-content-digest" {print $2}')
+          layer=$(python3 -c 'import json; print(json.load(open("manifest.json"))["layers"][0]["digest"])')
+          echo "$TAG is $digest; its layer is $layer"
+          [ "$layer" = "sha256:$(sha256sum "$SIF" | cut -d' ' -f1)" ]
+
+          echo "$GITHUB_TOKEN" | cosign login ghcr.io -u "$ACTOR" --password-stdin
+          cosign sign --yes "$IMAGE@$digest"
+          # What rt-run will ask: signed by this workflow, on main.
+          cosign verify \
+            --certificate-identity "https://github.com/$REPO/.github/workflows/build-test-push.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE@$digest" > /dev/null

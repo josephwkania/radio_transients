@@ -94,4 +94,5 @@ back at S/N ~100 at DM 100 and nothing above S/N 8 at DM 0, 50 or 150.
   each takes its `Version` label from `rt-run` and its `Build-date` from
   the build, rather than from `%labels`, so the images cannot disagree
 - `rt_run_fakes.py` — what `test_rt_run.py` runs `rt-run` against: a stub
-  `apptainer`, a fake registry for digest lookups, and a scratch `HOME`
+  `apptainer`, a stub `cosign`, a fake registry for digest lookups, and a
+  scratch `HOME`

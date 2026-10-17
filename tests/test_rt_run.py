@@ -11,6 +11,9 @@ for real against every image it builds.
     pip install . pytest && pytest tests/test_rt_run.py
 """
 
+# One suite for one module, as rt_run.py is one file on purpose.
+# pylint: disable=too-many-lines
+
 import os
 import platform
 import re
@@ -180,6 +183,7 @@ def test_history_keeps_a_line_per_install_and_update(full):
         "built Monday_7_September_2026",
         f"{REGISTRY}:latest",
         first,
+        "unchecked: no cosign",
     ]
     assert rows[1][5] == second
     assert rows[1][3] == "built Monday_14_September_2026"
@@ -196,6 +200,7 @@ def test_an_install_from_a_file_records_the_file(w):
         "built unknown",
         str(mine),
         "-",  # no registry digest for a file
+        "unchecked: local file",
     ]
     out = w.tool("rt-run", "list").out
     assert re.search(rf"  installed  {WHEN}, from {re.escape(str(mine))}\n", out)
@@ -738,6 +743,107 @@ def test_uninstall_keeps_the_file_installed_from(w):
     assert w.rt_run("install", "cpu", "--from", mine).rc == 0
     assert w.tool("rt-run", "uninstall").rc == 0
     assert mine.exists() and not w.rt.exists()
+
+
+# ---------------------------------------------------------------------------
+# Signatures
+# ---------------------------------------------------------------------------
+
+
+def test_without_cosign_the_signature_goes_unchecked(w):
+    result = w.rt_run("install", "gpu")
+    assert result.rc == 0, result.out
+    assert "not checking the image's signature" in result.out
+    assert "install cosign" in result.out
+    assert history(w)[-1][6] == "unchecked: no cosign"
+    assert "  signature  unchecked: no cosign\n" in w.tool("rt-run", "list").out
+
+
+def test_with_cosign_the_signature_is_checked_first(w):
+    w.cosign()
+    digest = w.registry.digests["gpu"]
+    result = w.rt_run("install", "gpu")
+    assert result.rc == 0, result.out
+    assert w.cosign_calls() == [
+        ["verify", "--certificate-identity", rt_run.SIGNER]
+        + ["--certificate-oidc-issuer", rt_run.SIGNER_ISSUER]
+        + [f"ghcr.io/josephwkania/radio_transients@{digest}"]
+    ]
+    assert rt_run.SIGNER.endswith("/build-test-push.yml@refs/heads/main")
+    assert w.pulls() == [f"{REGISTRY}@{digest}"]
+    assert history(w)[-1][6] == rt_run.SIGNED
+    assert f"  signature  {rt_run.SIGNED}\n" in w.tool("rt-run", "list").out
+
+
+def test_an_unsigned_image_is_never_pulled(w):
+    w.cosign()
+    w.unsign(w.registry.digests["gpu"])
+    result = w.rt_run("install", "gpu")
+    assert result.rc == 1
+    assert "no valid signature" in result.out and "no signatures found" in result.out
+    assert "RT_VERIFY=0" in result.out
+    assert not w.pulls() and not (w.rt / "tag").exists()
+    assert not w.bin.exists() or not any(w.bin.iterdir())
+
+
+def test_install_digest_checks_that_digest(w):
+    w.cosign()
+    old = w.registry.digests["gpu"]
+    w.registry.move("gpu")
+    assert w.rt_run("install", "gpu", "--digest", old).rc == 0
+    assert w.cosign_calls()[-1][-1].endswith(f"@{old}")
+
+
+def test_rt_verify_0_skips_the_check(w):
+    w.cosign()
+    w.unsign(w.registry.digests["gpu"])
+    result = w.rt_run("install", "gpu", RT_VERIFY=0)
+    assert result.rc == 0, result.out
+    assert not w.cosign_calls()
+    assert history(w)[-1][6] == "unchecked: RT_VERIFY=0"
+
+
+@pytest.mark.parametrize(
+    "setup, complaint",
+    [
+        ("no cosign", "cosign, which checks it, isn't installed"),
+        ("no registry", "didn't say which image the tag is"),
+        ("from a file", "an image from a file has no signature"),
+    ],
+)
+def test_rt_verify_require_refuses_what_it_cannot_check(w, setup, complaint):
+    args, env = ["install", "gpu"], {"RT_VERIFY": "require"}
+    if setup != "no cosign":
+        w.cosign()
+    if setup == "no registry":
+        env["RT_REGISTRY_API"] = "http://127.0.0.1:9"
+    if setup == "from a file":
+        (w.root / "gpu.sif").write_text("{}")
+        args += ["--from", w.root / "gpu.sif"]
+    result = w.rt_run(*args, **env)
+    assert result.rc == 1 and complaint in result.out
+    assert not w.pulls() and not (w.rt / "tag").exists()
+
+
+def test_rt_verify_takes_only_its_three_values(w):
+    result = w.rt_run("install", "gpu", RT_VERIFY="yes")
+    assert result.rc == 2 and "it takes auto, require or 0" in result.out
+    assert not w.pulls()
+
+
+def test_update_checks_a_new_image_and_keeps_the_old_one_if_unsigned(full):
+    full.cosign()
+    assert full.tool("rt-run", "update").rc == 0  # the tag hasn't moved
+    assert not full.cosign_calls()
+    signed = full.registry.move()
+    assert full.tool("rt-run", "update").rc == 0
+    assert full.cosign_calls()[-1][-1].endswith(f"@{signed}")
+    full.unsign(full.registry.move())
+    result = full.tool("rt-run", "update")
+    assert result.rc == 1 and "no valid signature" in result.out
+    assert (full.rt / "digest").read_text().strip() == signed
+    assert [row[1] for row in history(full)] == ["install", "update"]
+    assert full.pulls()[-1] == f"{REGISTRY}@{signed}"
 
 
 # ---------------------------------------------------------------------------
