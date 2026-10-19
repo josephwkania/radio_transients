@@ -5,15 +5,27 @@ name: build, test, push
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'Singularity*'
+      # rt-run is installed into every image.
+      - 'src/**'
+      - 'pyproject.toml'
       - 'tests/**'
+      # Need no image; rt-run.yml runs them in a minute.
+      - '!tests/test_rt_run.py'
+      - '!tests/rt_run_fakes.py'
+      - '!tests/test_recipes.py'
       - '.github/workflows/build-test-push.yml'
   pull_request:
     paths:
       - 'Singularity*'
+      - 'src/**'
+      - 'pyproject.toml'
       - 'tests/**'
+      - '!tests/test_rt_run.py'
+      - '!tests/rt_run_fakes.py'
+      - '!tests/test_recipes.py'
   schedule:
     # Weekly rebuild, so upstream breakage surfaces on a Monday rather than
     # the morning someone needs the container.
@@ -47,7 +59,9 @@ jobs:
             black==26.5.1 \
             flake8==7.3.0 \
             pylint==4.0.8 \
-            numpy
+            numpy \
+            pytest \
+            .
 
       # Each tool reads its own config from tests/ -- no flags here, so what
       # CI enforces is exactly what runs locally.
@@ -84,6 +98,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # For cosign's keyless signing: GitHub's word that this is this
+      # workflow, running on main.
+      id-token: write
 
     strategy:
       fail-fast: false
@@ -154,7 +171,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libseccomp-dev pkg-config \
-            uidmap squashfs-tools fakeroot cryptsetup tzdata git
+            uidmap squashfs-tools squashfuse fakeroot cryptsetup tzdata git
 
       - name: Set up Go (arm64)
         if: matrix.runner == 'ubuntu-24.04-arm'
@@ -170,6 +187,19 @@ jobs:
           ./mconfig
           make -C builddir -j"$(nproc)"
           sudo make -C builddir install
+          # Ubuntu 24.04's AppArmor forbids unprivileged user namespaces, and
+          # only the .deb installs the profile that exempts apptainer. Without
+          # it every unprivileged exec fails with "Operation not permitted".
+          # This is the profile apptainer's INSTALL.md gives for source builds.
+          sudo tee /etc/apparmor.d/apptainer > /dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile apptainer /usr/local/libexec/apptainer/bin/starter{,-suid} flags=(unconfined) {
+            userns,
+            include if exists <local/apptainer>
+          }
+          EOF
+          sudo systemctl reload apparmor
           apptainer --version
 
       # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor, so
@@ -194,12 +224,63 @@ jobs:
       # The runner has no GPU, which is exactly what the suite is written for.
       - name: Test
         run: |
+          # The default shell has no pipefail, so without this the tee
+          # would hide a failing suite, or an image that will not start.
+          set -o pipefail
           apptainer exec \
             --bind "$PWD/tests:/tests" \
             radio_transients_${{ matrix.tag }}.sif \
             bash /tests/container_test.sh \
               --variant ${{ matrix.variant == 'latest' && 'full' || matrix.variant }} \
             | tee test-results-${{ matrix.tag }}.tap
+
+      # The ways to run the image from outside it. `run IMAGE CMD` must pass
+      # CMD its arguments. rt-run must install from the image alone, with the
+      # `install` app; must install from the host, reading the variant from
+      # the image's RT_TAG label; and must bind-mount a directory outside
+      # $HOME, /tmp and $PWD, which only it makes visible.
+      - name: Test runscript and rt-run
+        env:
+          SIF: radio_transients_${{ matrix.tag }}.sif
+          VARIANT: ${{ matrix.variant }}
+          TAG: ${{ matrix.tag }}
+          RT_HOME: ${{ runner.temp }}/rt
+        run: |
+          set -x
+          # One Version label, rt-run's, and a build date; the recipe writes
+          # both, so the four images cannot disagree.
+          version=$(apptainer exec "$SIF" /usr/local/miniconda/envs/RT/bin/rt-run --version | cut -d' ' -f2)
+          apptainer inspect "$SIF" | grep -qxF "Version: v$version"
+          apptainer inspect "$SIF" | grep -qE '^Build-date: [0-9]{2}-[A-Z][a-z]{2}-[0-9]{4}$'
+          # Images built for one CPU (--build-arg MARCH=...) are for their
+          # builder only; nothing CI publishes may be one.
+          if [ "$VARIANT" != gpu ]; then
+            apptainer inspect "$SIF" | grep -qx 'Build-march: none'
+          fi
+          prefix=$(apptainer run "$SIF" python -c 'import sys; print(sys.prefix)')
+          [ "$prefix" = /usr/local/miniconda/envs/RT ]
+          if [ "$VARIANT" = latest ]; then
+            # The full image's default is your_heimdall.py, options and all.
+            apptainer run "$SIF" --help | grep -q your_heimdall
+          else
+            # With no command, the others open a shell.
+            env=$(echo 'echo "$CONDA_DEFAULT_ENV"' | apptainer run "$SIF")
+            [ "$env" = RT ]
+          fi
+
+          apptainer run --app install "$SIF"
+          [ "$(cat "$RT_HOME/tag")" = "$TAG" ]
+          "$RT_HOME/bin/rt-run" list
+          "$RT_HOME/bin/rt-run" uninstall
+
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-cache-dir .
+          "$RUNNER_TEMP/venv/bin/rt-run" install --from "$SIF"
+          [ "$(cat "$RT_HOME/tag")" = "$TAG" ]
+          sudo mkdir /rt-data
+          sudo chown "$USER" /rt-data
+          "$RT_HOME/bin/rt-run" python tests/make_filterbank.py /rt-data/x.fil
+          "$RT_HOME/bin/your_header.py" -f /rt-data/x.fil
 
       - name: Upload test results
         if: always()
@@ -208,11 +289,57 @@ jobs:
           name: tap-${{ matrix.tag }}
           path: test-results-${{ matrix.tag }}.tap
 
-      # Only reached when the tests passed, and never on a pull request.
+      # Only reached when the tests passed, and only from main: never on a
+      # pull request, and never from "Run workflow" on another branch, which
+      # would put an untested branch's images over the published tags.
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | apptainer registry login \
             --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
           apptainer push radio_transients_${{ matrix.tag }}.sif \
             oras://${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      # Keyless: the signature carries GitHub's word that build-test-push.yml
+      # on main made it, and there is no key to keep. rt-run checks it before
+      # pulling; `cosign verify` does by hand (see the README). GHCR has no
+      # referrers API, so cosign keeps it under the tag sha256-<digest>.
+      - name: Sign the image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          SIF: radio_transients_${{ matrix.tag }}.sif
+          TAG: ${{ matrix.tag }}
+          REPO: ${{ github.repository }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # apptainer push doesn't print the digest it pushed, so ask GHCR --
+          # and sign it only if its one layer is this file, not whatever
+          # another run may have pushed to the tag since.
+          token=$(curl -fsS -u "$ACTOR:$GITHUB_TOKEN" \
+            "https://ghcr.io/token?scope=repository:$REPO:pull" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])')
+          curl -fsS -D headers -o manifest.json \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/$REPO/manifests/$TAG"
+          digest=$(tr -d '\r' < headers | awk -F': ' 'tolower($1) == "docker-content-digest" {print $2}')
+          layer=$(python3 -c 'import json; print(json.load(open("manifest.json"))["layers"][0]["digest"])')
+          echo "$TAG is $digest; its layer is $layer"
+          [ "$layer" = "sha256:$(sha256sum "$SIF" | cut -d' ' -f1)" ]
+
+          echo "$GITHUB_TOKEN" | cosign login ghcr.io -u "$ACTOR" --password-stdin
+          cosign sign --yes "$IMAGE@$digest"
+          # What rt-run will ask: signed by this workflow, on main.
+          cosign verify \
+            --certificate-identity "https://github.com/$REPO/.github/workflows/build-test-push.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE@$digest" > /dev/null

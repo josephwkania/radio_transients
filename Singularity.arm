@@ -2,10 +2,27 @@ BootStrap: docker
 From: arm64v8/ubuntu:22.04
 
 
+%files
+    pyproject.toml /opt/rt-run/pyproject.toml
+    README.md /opt/rt-run/README.md
+    LICENSE /opt/rt-run/LICENSE
+    src/rt_run.py /opt/rt-run/src/rt_run.py
+
+%arguments
+    # `--build-arg MARCH=native` (or armv8.2-a, ...) builds the tools whose
+    # upstreams use -march -- PRESTO, iqrm_apollo, riptide, RFIClean -- for
+    # that CPU. Off by default: the published images run on any machine of
+    # the architecture, and CI refuses to publish anything else. See "Build
+    # flags" in the README.
+    MARCH=none
+
 %post
     echo "Installing packages needed for multiple programs"
     apt-get -y update
     export DEBIAN_FRONTEND=noninteractive 
+    MARCH="{{ MARCH }}"
+    case "$MARCH" in ""|none) MARCH=none; MARCH_FLAG="" ;; *) MARCH_FLAG="-march=$MARCH" ;; esac
+    echo "Build-march $MARCH" >> "$SINGULARITY_LABELS"
     apt-get -y install build-essential cmake git htop software-properties-common wget # need these to build packages
      
     apt-add-repository multiverse # add the multiverse repository (where pgplot5 lives)
@@ -40,6 +57,16 @@ From: arm64v8/ubuntu:22.04
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
     mkdir build; cd build
+    # Its cmake/compiler_settings.cmake forces -march=native with set(), which
+    # no flag can override; that tied the binary to whatever CPU built the
+    # image. Swap in MARCH's choice, or nothing, and fail if the sed stops
+    # matching rather than silently go back to native.
+    sed -i "s/ -march=native/${MARCH_FLAG:+ $MARCH_FLAG}/" ../cmake/compiler_settings.cmake
+    if [ -z "$MARCH_FLAG" ]; then
+        ! grep -q -- '-march' ../cmake/compiler_settings.cmake || { echo "iqrm_apollo still has -march" >&2; exit 1; }
+    else
+        grep -qF -- "$MARCH_FLAG" ../cmake/compiler_settings.cmake || { echo "iqrm_apollo didn't take $MARCH_FLAG" >&2; exit 1; }
+    fi
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
@@ -54,7 +81,7 @@ From: arm64v8/ubuntu:22.04
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
     apt-get -y install csh autoconf gfortran
-    git clone git://git.code.sf.net/p/tempo/tempo
+    git clone https://git.code.sf.net/p/tempo/tempo
     cd tempo
     ./prepare
     ./configure
@@ -71,14 +98,18 @@ From: arm64v8/ubuntu:22.04
     # subproject when the system has none. Singularity.cpu already made this
     # switch; this is the same change, targeting the conda env this recipe now
     # builds against instead of /usr/local.
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
+    # liberfa-dev: without a system ERFA, meson downloads and builds one.
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev liberfa-dev
     apt-get -y clean
     conda install -y meson meson-python ninja
     conda clean -y --all
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    meson setup build --prefix=$CONDA_PREFIX
+    # PRESTO's own default is -O2 -g, which its INSTALL.md measured as fast as
+    # -O3. -march, when MARCH asks for it, is its documented speed-up for
+    # accelsearch.
+    meson setup build --prefix=$CONDA_PREFIX ${MARCH_FLAG:+-Dc_args=$MARCH_FLAG}
     # meson installs libraries to $prefix/lib/<triplet>, and check_meson_build.py
     # refuses to proceed unless that directory is on LIBRARY_PATH. Derive the
     # triplet rather than hardcoding it, so this works on every architecture.
@@ -92,6 +123,14 @@ From: arm64v8/ubuntu:22.04
     pip install --no-cache-dir --config-settings=builddir=build .
     cd "$PRESTO"
     echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
+
+    # PRESTO makes polycos (prepfold -timing) with tempo2 now, not TEMPO.
+    # Installed after PRESTO is built, so PRESTO's meson can't pick up the
+    # conda-forge fftw, cfitsio and gsl it brings. Its activation script sets
+    # TEMPO2, which %environment's `activate RT` runs.
+    echo "Installing tempo2"
+    conda install -y -c conda-forge tempo2
+    echo "tempo2 $(conda list '^tempo2$' | awk '$1 == "tempo2" {print $2}') from conda-forge" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
@@ -120,7 +159,6 @@ From: arm64v8/ubuntu:22.04
     # git clone https://github.com/josephwkania/RFIClean.git
     git clone https://github.com/ymaan4/RFIClean.git 
     cd RFIClean
-    mkdir -p /home/maan/pulsar_softwares/bin
     # RFIClean declares its sigproc globals in a header without `extern`. GCC 9
     # accepted that because -fcommon was the default; GCC 10 onwards defaults to
     # -fno-common, so every translation unit emits its own definition and the
@@ -130,16 +168,30 @@ From: arm64v8/ubuntu:22.04
     # repeated or the compile cannot find the headers. -march=native is dropped
     # deliberately: it bakes the build machine's ISA into the binary, which is
     # wrong for a container meant to run on other hardware.
-    make CFLAGS="-Iinclude -Wno-unused-result -O3 -fcommon"
-    make install
-    mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
-    rm -r /home/maan
+    # MARCH, when given, adds a -march of the builder's choosing.
+    make CFLAGS="-Iinclude -Wno-unused-result -O3 -fcommon $MARCH_FLAG"
+    # MYBIN is its install directory, hard-coded to the author's home.
+    make install MYBIN=/usr/local/bin
     echo "RFICLean Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf RFIClean 
 
     echo "Installing riptide"
-    pip install --no-cache-dir riptide-ffa
-    echo "riptide-ffa installed from pip" >> "$SINGULARITY_LABELS"
+    # PyPI has only its source, and its setup.py compiles with -march=native,
+    # which no CFLAGS can override. Patch in MARCH's choice, or nothing.
+    mkdir /tmp/riptide
+    pip download --no-cache-dir --no-deps --no-binary riptide-ffa --dest /tmp/riptide riptide-ffa
+    tar xf /tmp/riptide/riptide*ffa-*.tar.gz -C /tmp/riptide
+    cd /tmp/riptide/riptide*ffa-*/
+    if [ -z "$MARCH_FLAG" ]; then
+        sed -i 's/, *"-march=native"//' setup.py
+        ! grep -q -- '-march' setup.py || { echo "riptide still has -march" >&2; exit 1; }
+    else
+        sed -i "s/\"-march=native\"/\"$MARCH_FLAG\"/" setup.py
+        grep -qF -- "\"$MARCH_FLAG\"" setup.py || { echo "riptide didn't take $MARCH_FLAG" >&2; exit 1; }
+    fi
+    pip install --no-cache-dir .
+    echo "riptide-ffa $(basename "$PWD" | sed 's/^riptide.ffa-//') from PyPI" >> "$SINGULARITY_LABELS"
+    cd ~ && rm -rf /tmp/riptide
  
     echo "Installing sigproc"
     cd ~
@@ -147,6 +199,7 @@ From: arm64v8/ubuntu:22.04
     cd sigproc
     ./bootstrap
     ./configure --prefix=/usr/local/
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "sigproc lost its -O2" >&2; exit 1; }
     make
     make install
     echo "sigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
@@ -196,6 +249,24 @@ From: arm64v8/ubuntu:22.04
     apt-get -y clean # /var/cache/apt/archives is not emptied on its own,
     conda clean --all
 
+    # rt-run, the host-side launcher, which %files copied in -- from paths
+    # relative to where `singularity build` runs, so build from the repo's
+    # root. Here so that `singularity run --app install IMAGE` works from the
+    # image alone, and so that `rt-run update` can take the launcher matching
+    # the image it pulled.
+    /usr/local/miniconda/envs/RT/bin/pip install --no-cache-dir /opt/rt-run
+    rm -rf /opt/rt-run
+    # One version for the whole repo, rt-run's __version__ -- the same number
+    # PyPI has -- written here rather than in %labels so the four recipes
+    # cannot drift apart. The build date is the day this ran, not a day
+    # someone typed in.
+    RT_VERSION=$(/usr/local/miniconda/envs/RT/bin/rt-run --version | cut -d' ' -f2)
+    echo "Version v$RT_VERSION" >> "$SINGULARITY_LABELS"
+    echo "Build-date $(date -u +%d-%b-%Y)" >> "$SINGULARITY_LABELS"
+    # The GHCR tag this build is published as: what `rt-run install --from`
+    # records, and what `rt-run update` pulls.
+    echo "RT_TAG arm" >> "$SINGULARITY_LABELS"
+
     # Nothing reads these after the build. pip's wheel cache is the big one --
     # 206 MB here, and wheels are already compressed, so it costs full size in
     # the image and on every pull.
@@ -230,8 +301,12 @@ From: arm64v8/ubuntu:22.04
 
 
 %runscript
-    exec /usr/local/miniconda/RT/bin/"$@"
-    exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    # `singularity run IMAGE CMD [ARGS...]` runs CMD, found on the PATH that
+    # %environment sets up; with no arguments it opens a shell.
+    if [ "$#" -gt 0 ]; then
+        exec "$@"
+    fi
+    exec /bin/bash --noprofile --init-file /.singularity_bash
 
 
 %help
@@ -248,6 +323,7 @@ From: arm64v8/ubuntu:22.04
     riptide       https://github.com/v-morello/riptide
     sigproc       https://github.com/SixByNine/sigproc
     Tempo         http://tempo.sourceforge.net/ - modified to compile on arm
+    tempo2        https://bitbucket.org/psrsoft/tempo2
     RFIClean      https://github.com/ymaan4/RFIClean
     will           https://github.com/josephwkania/will
     YAPP          https://github.com/jayanthc/yapp
@@ -256,5 +332,14 @@ From: arm64v8/ubuntu:22.04
 
 %labels
     Author Joseph W Kania
-    Version v0.1.0
 
+
+%apphelp install
+    Put this image's tools on your PATH, on the host:
+
+        singularity run --app install IMAGE.sif [--bin-dir DIR]
+
+    Then add the directory it names to PATH. See `rt-run --help`.
+
+%apprun install
+    exec /usr/local/miniconda/envs/RT/bin/rt-run install "$@"

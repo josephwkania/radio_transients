@@ -6,12 +6,26 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # 11.8 stays the default: it is what the published images have always been
     # and what the CUDA 11 driver branches in the field expect.
     CUDA_VERSION=11.8.0
+    # `--build-arg MARCH=native` (or x86-64-v3, ...) builds the tools whose
+    # upstreams use -march -- PRESTO, iqrm_apollo, riptide, RFIClean -- for
+    # that CPU. Off by default: the published images run on any x86-64, and
+    # CI refuses to publish anything else. See "Build flags" in the README.
+    MARCH=none
 
+
+%files
+    pyproject.toml /opt/rt-run/pyproject.toml
+    README.md /opt/rt-run/README.md
+    LICENSE /opt/rt-run/LICENSE
+    src/rt_run.py /opt/rt-run/src/rt_run.py
 
 %post
     apt-get update # update and install packages we need for the build
     export DEBIAN_FRONTEND=noninteractive 
     export TZ=Etc/UTC
+    MARCH="{{ MARCH }}"
+    case "$MARCH" in ""|none) MARCH=none; MARCH_FLAG="" ;; *) MARCH_FLAG="-march=$MARCH" ;; esac
+    echo "Build-march $MARCH" >> "$SINGULARITY_LABELS"
     apt-get -y install autoconf build-essential cmake csh git htop libboost-all-dev libtool libtool-bin software-properties-common wget
     # need these to build packages
 
@@ -60,21 +74,27 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     cd ~/source
     git clone https://github.com/ajameson/dedisp.git
     cd dedisp
-    sed -i 's/sm_30/all-major/g' Makefile.inc
-    make INSTALL_DIR=$HOME/software/dedisp install
+    # Makefile.inc defaults to sm_30, which CUDA 11 refuses; it takes
+    # GPU_ARCH from the command line. all-major: machine code for every major
+    # GPU generation, so one image runs on any card.
+    make GPU_ARCH=all-major INSTALL_DIR=$HOME/software/dedisp install
     cp ~/software/dedisp/lib/* /usr/local/lib
-    export LD_LIBRARY_PATH=LD_LIBRARY_PATH:~/software/dedisp
     echo "dedisp Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Building Psrdada"
     cd ~/source
-    export CFLAGS="-fopenmp -fPIC"
-    # conda install "cython<3.0"
     git clone https://git.code.sf.net/p/psrdada/code psrdada
     cd psrdada
     ./bootstrap
-    ./configure --prefix=$HOME/software/psrdada
-    make
+    # Given to configure, not exported. An exported CFLAGS reaches every later
+    # autoconf build in this recipe, and autoconf only adds its default
+    # `-g -O2` when CFLAGS is unset: it left psrdada, Heimdall's CUDA host
+    # code and sigproc without -O. Each autoconf build below checks it got -O2.
+    ./configure --prefix=$HOME/software/psrdada CFLAGS="-g -O2 -fopenmp -fPIC"
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "psrdada lost its -O2" >&2; exit 1; }
+    # Nothing sets CUDA_NVCC_FLAGS, so nvcc would build psrdada's CUDA code for
+    # its default sm_52 alone. -O2 for the host side, as the C gets.
+    make CUDA_NVCC_FLAGS="-O2 -arch=all-major"
     make install
     cp -r ~/software/psrdada/bin/* /usr/local/bin
     cp -r ~/software/psrdada/lib/* /usr/local/lib
@@ -84,11 +104,17 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     export PATH=$PATH:/usr/local/cuda
     echo "Building Heimdall"
     cd ~/source
-    git clone git://git.code.sf.net/p/heimdall-astro/code heimdall
+    git clone https://git.code.sf.net/p/heimdall-astro/code heimdall
     cd heimdall
     ./bootstrap
     ./configure --prefix=$HOME/software/heimdall/linux_64 --with-psrdada-dir=$HOME/software/psrdada --with-dedisp-dir=$HOME/software/dedisp --with-cuda-dir=/usr/local/cuda
-    make install
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "Heimdall lost its -O2" >&2; exit 1; }
+    # Heimdall's .cu host code takes CFLAGS; its GPU code, like psrdada's,
+    # would otherwise be sm_52 only. Unoptimised host code made Heimdall
+    # about 3.7x slower; the GPU target changes S/N rounding slightly, not
+    # speed. No -march: it gains nothing here, the host side is mostly waiting
+    # on the GPU.
+    make CUDA_NVCC_FLAGS="-O2 -arch=all-major" install
     mv ~/software/heimdall/linux_64/bin/* /usr/local/bin
     echo "Heimdall Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
@@ -99,6 +125,16 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     git clone https://gitlab.com/kmrajwade/iqrm_apollo.git
     cd iqrm_apollo
     mkdir build; cd build
+    # Its cmake/compiler_settings.cmake forces -march=native with set(), which
+    # no flag can override; that tied the binary to whatever CPU built the
+    # image. Swap in MARCH's choice, or nothing, and fail if the sed stops
+    # matching rather than silently go back to native.
+    sed -i "s/ -march=native/${MARCH_FLAG:+ $MARCH_FLAG}/" ../cmake/compiler_settings.cmake
+    if [ -z "$MARCH_FLAG" ]; then
+        ! grep -q -- '-march' ../cmake/compiler_settings.cmake || { echo "iqrm_apollo still has -march" >&2; exit 1; }
+    else
+        grep -qF -- "$MARCH_FLAG" ../cmake/compiler_settings.cmake || { echo "iqrm_apollo didn't take $MARCH_FLAG" >&2; exit 1; }
+    fi
     cmake -DBOOST_ROOT=/ ../
     make -j
     cp iqrm_apollo/iqrm_apollo_cli /usr/local/bin/
@@ -112,7 +148,7 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     echo "Installing Tempo"
     cd /usr/local #put file here so we can access them later
     apt-get -y install csh autoconf gfortran
-    git clone git://git.code.sf.net/p/tempo/tempo
+    git clone https://git.code.sf.net/p/tempo/tempo
     cd tempo
     ./prepare
     ./configure
@@ -122,13 +158,17 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     echo "Tempo Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
 
     echo "Installing PRESTO"
-    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev
+    # liberfa-dev: without a system ERFA, meson downloads and builds one.
+    apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev liberfa-dev
     conda install meson meson-python ninja
     cd /usr/local/
     git clone https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
-    meson setup build --prefix=$CONDA_PREFIX
+    # PRESTO's own default is -O2 -g, which its INSTALL.md measured as fast as
+    # -O3. -march, when MARCH asks for it, is its documented speed-up for
+    # accelsearch.
+    meson setup build --prefix=$CONDA_PREFIX ${MARCH_FLAG:+-Dc_args=$MARCH_FLAG}
     export LD_LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     export LIBRARY_PATH=/usr/local/miniconda/envs/RT/lib/x86_64-linux-gnu:$LIBRARY_PATH
     python check_meson_build.py
@@ -140,6 +180,14 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # ./build/src/makewisdom # Machine specific, commented out for general builds
     # mv fftw_wisdom.txt $PRESTO/lib/
     echo "PRESTO Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)" >> "$SINGULARITY_LABELS"
+
+    # PRESTO makes polycos (prepfold -timing) with tempo2 now, not TEMPO.
+    # Installed after PRESTO is built, so PRESTO's meson can't pick up the
+    # conda-forge fftw, cfitsio and gsl it brings. Its activation script sets
+    # TEMPO2, which %environment's `activate RT` runs.
+    echo "Installing tempo2"
+    conda install -y -c conda-forge tempo2
+    echo "tempo2 $(conda list '^tempo2$' | awk '$1 == "tempo2" {print $2}') from conda-forge" >> "$SINGULARITY_LABELS"
 
     echo "Installing psrcat"
     cd ~
@@ -179,7 +227,6 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # git clone https://github.com/josephwkania/RFIClean.git
     git clone https://github.com/ymaan4/RFIClean.git
     cd RFIClean
-    mkdir -p /home/maan/pulsar_softwares/bin
     # RFIClean defines its sigproc globals in a header without `extern`, which
     # only links because GCC defaults to -fcommon. GCC 10 onwards defaults to
     # -fno-common and the link fails with "multiple definition of". This base
@@ -193,16 +240,30 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # the floor silently changes with whichever runner CI happens to draw.
     # -mtune keeps the scheduling tuning, which costs nothing elsewhere, without
     # restricting the instruction set.
-    make CFLAGS="-Iinclude -Wno-unused-result -O3 -mtune=native -fcommon"
-    make install
-    mv /home/maan/pulsar_softwares/bin/* /usr/local/bin
-    rm -r /home/maan
+    # MARCH, when given, adds a -march of the builder's choosing.
+    make CFLAGS="-Iinclude -Wno-unused-result -O3 -mtune=native -fcommon $MARCH_FLAG"
+    # MYBIN is its install directory, hard-coded to the author's home.
+    make install MYBIN=/usr/local/bin
     echo "RFICLean Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf RFIClean
 
     echo "Installing riptide"
-    pip install riptide-ffa
-    echo "riptide-ffa installed from pip"
+    # PyPI has only its source, and its setup.py compiles with -march=native,
+    # which no CFLAGS can override. Patch in MARCH's choice, or nothing.
+    mkdir /tmp/riptide
+    pip download --no-deps --no-binary riptide-ffa --dest /tmp/riptide riptide-ffa
+    tar xf /tmp/riptide/riptide*ffa-*.tar.gz -C /tmp/riptide
+    cd /tmp/riptide/riptide*ffa-*/
+    if [ -z "$MARCH_FLAG" ]; then
+        sed -i 's/, *"-march=native"//' setup.py
+        ! grep -q -- '-march' setup.py || { echo "riptide still has -march" >&2; exit 1; }
+    else
+        sed -i "s/\"-march=native\"/\"$MARCH_FLAG\"/" setup.py
+        grep -qF -- "\"$MARCH_FLAG\"" setup.py || { echo "riptide didn't take $MARCH_FLAG" >&2; exit 1; }
+    fi
+    pip install .
+    echo "riptide-ffa $(basename "$PWD" | sed 's/^riptide.ffa-//') from PyPI" >> "$SINGULARITY_LABELS"
+    cd ~ && rm -rf /tmp/riptide
 
     echo "Installing sigproc"
     cd ~
@@ -210,6 +271,7 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     cd sigproc
     ./bootstrap
     ./configure --prefix=/usr/local/
+    grep -q '^CFLAGS = .*-O2' Makefile || { echo "sigproc lost its -O2" >&2; exit 1; }
     make
     make install
     echo "sigproc Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
@@ -297,6 +359,28 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
         ln -s "$NVVM_WHEEL" /usr/local/cuda/nvvm
     fi
 
+    # rt-run, the host-side launcher, which %files copied in -- from paths
+    # relative to where `singularity build` runs, so build from the repo's
+    # root. Here so that `singularity run --app install IMAGE` works from the
+    # image alone, and so that `rt-run update` can take the launcher matching
+    # the image it pulled.
+    /usr/local/miniconda/envs/RT/bin/pip install --no-cache-dir /opt/rt-run
+    rm -rf /opt/rt-run
+    # One version for the whole repo, rt-run's __version__ -- the same number
+    # PyPI has -- written here rather than in %labels so the four recipes
+    # cannot drift apart. The build date is the day this ran, not a day
+    # someone typed in.
+    RT_VERSION=$(/usr/local/miniconda/envs/RT/bin/rt-run --version | cut -d' ' -f2)
+    echo "Version v$RT_VERSION" >> "$SINGULARITY_LABELS"
+    echo "Build-date $(date -u +%d-%b-%Y)" >> "$SINGULARITY_LABELS"
+    # The GHCR tag this build is published as: what `rt-run install --from`
+    # records, and what `rt-run update` pulls.
+    case "{{ CUDA_VERSION }}" in
+        11.8*) RT_TAG=latest ;;
+        *) RT_TAG=latest-cuda$(echo "{{ CUDA_VERSION }}" | cut -d. -f1-2) ;;
+    esac
+    echo "RT_TAG $RT_TAG" >> "$SINGULARITY_LABELS"
+
     # Nothing reads these after the build. pip's wheel cache is the big one --
     # 3.2 GB here, and wheels are already compressed, so it costs full size in
     # the image and on every pull.
@@ -335,9 +419,14 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     export QT_QPA_PLATFORM=offscreen # allows your_viewer to run when --nv is given, see https://github.com/therecipe/qt/issues/775#issuecomment-475900676
 
 %runscript
-    exec your_heimdall.py
-    # exec /usr/local/miniconda/RT/bin/"$@"
-    # exec /bin/bash --noprofile --init-file /.singularity_bash "$@"
+    # `singularity run IMAGE CMD [ARGS...]` runs CMD, found on the PATH that
+    # %environment sets up. Anything else -- no arguments, or ones starting
+    # with an option such as `-f data.fil` -- goes to your_heimdall.py, which
+    # has been this image's default since 2021.
+    if [ "$#" -gt 0 ] && command -v "$1" >/dev/null 2>&1; then
+        exec "$@"
+    fi
+    exec your_heimdall.py "$@"
 
 
 %help
@@ -360,6 +449,7 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     riptide        https://github.com/v-morello/riptide
     sigproc        https://github.com/SixByNine/sigproc
     Tempo          http://tempo.sourceforge.net/
+    tempo2         https://bitbucket.org/psrsoft/tempo2
     RFIClean       https://github.com/ymaan4/RFIClean
     will           https://github.com/josephwkania/will
     YAPP           https://github.com/jayanthc/yapp
@@ -368,5 +458,14 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
 
 %labels
     Author Joseph W Kania
-    Version v0.2.1
-    Build-date 04-Sep-2026
+
+
+%apphelp install
+    Put this image's tools on your PATH, on the host:
+
+        singularity run --app install IMAGE.sif [--bin-dir DIR]
+
+    Then add the directory it names to PATH. See `rt-run --help`.
+
+%apprun install
+    exec /usr/local/miniconda/envs/RT/bin/rt-run install "$@"

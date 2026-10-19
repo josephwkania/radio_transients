@@ -1,0 +1,174 @@
+name: publish rt-run to PyPI
+
+# Uploads rt-run, as `radio-transients`, to PyPI when a GitHub release is
+# published. Every run -- a pull request or push to main that changes the
+# package, "Run workflow" from the Actions tab, and the release itself before
+# it touches PyPI -- first uploads a dev build to TestPyPI and installs it
+# back from there, as a user would: a dry run of the real thing.
+#
+# Both use PyPI's trusted publishing, so no token is stored here. Once, by
+# hand, on pypi.org and on test.pypi.org, add a pending trusted publisher for
+# project `radio-transients`: owner josephwkania, repository
+# radio_transients, workflow `pypi.yml`, and environment `pypi` on PyPI,
+# `testpypi` on TestPyPI (https://docs.pypi.org/trusted-publishers/). Until
+# the TestPyPI one exists, the testpypi job fails. GitHub creates the two
+# environments the first time a job uses them. Leave `testpypi` without
+# required reviewers or branch rules, or every pull request waits on it;
+# protection rules on `pypi` are optional.
+#
+# Pull requests from forks get no OIDC token, so cannot upload; for them the
+# testpypi job is skipped, and rt-run.yml still builds and installs the wheel.
+#
+# To release: bump __version__ in src/rt_run.py, merge that to main, and
+# publish a release tagged v<version>. The images' Version label is the same
+# number, so the merge also puts it on the images build-test-push.yml builds.
+# Neither index ever takes a version twice, so each dry run uploads
+# <version>.dev<run id>: the run id is unique across workflows and runs, and
+# a re-run of the same run skips the upload it already made.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      # The package's long description and licence.
+      - 'README.md'
+      - 'LICENSE'
+      - '.github/workflows/pypi.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'README.md'
+      - 'LICENSE'
+      - '.github/workflows/pypi.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dev-version: ${{ steps.dev.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the tag matches the version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c 'import sys; sys.path.insert(0, "src"); import rt_run; print(rt_run.__version__)')
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "release tag $TAG does not match rt_run.__version__ $version" >&2
+            exit 1
+          fi
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python -c 'import sys; sys.path.insert(0, "src"); import rt_run; print(rt_run.__version__)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          pip install --no-cache-dir build
+          python -m build --outdir dist/
+
+      # The same source under a version of its own, for TestPyPI.
+      - name: Build the dry run
+        id: dev
+        env:
+          RUN: ${{ github.run_id }}
+        run: |
+          sed -i -E "s/^__version__ = \"([^\"]+)\"$/__version__ = \"\1.dev$RUN\"/" src/rt_run.py
+          version=$(python -c 'import sys; sys.path.insert(0, "src"); import rt_run; print(rt_run.__version__)')
+          [ "$version" = "${{ steps.version.outputs.version }}.dev$RUN" ]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          python -m build --outdir dist-dev/
+          git checkout src/rt_run.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-dev
+          path: dist-dev/
+
+  testpypi:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/radio-transients/${{ needs.build.outputs.dev-version }}/
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-dev
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      # What the dry run is for: install the upload as a user would. A new
+      # upload can take a minute or two to show in TestPyPI's index.
+      - name: Install it from TestPyPI
+        env:
+          VERSION: ${{ needs.build.outputs.dev-version }}
+        run: |
+          python3 -m venv /tmp/env
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if /tmp/env/bin/pip install --no-cache-dir \
+                --index-url https://test.pypi.org/simple/ \
+                "radio-transients==$VERSION"; then
+              break
+            fi
+            echo "not in the index yet (attempt $attempt); waiting"
+            sleep 30
+          done
+          /tmp/env/bin/rt-run --version | grep -qxF "rt-run $VERSION"
+          /tmp/env/bin/rt-run --help
+
+  pypi:
+    if: github.event_name == 'release'
+    # Only once the same source has gone through TestPyPI and back.
+    needs: [build, testpypi]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/radio-transients/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

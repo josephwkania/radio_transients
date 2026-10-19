@@ -252,13 +252,13 @@ if [ "$HAS_CPU_STACK" -eq 1 ]; then
     t_env TEMPO check
     t_env PRESTO check
     t_env PSRCAT_FILE check
+    # Set by conda-forge tempo2's activation script; prepfold -timing needs it.
+    t_env TEMPO2 check
     t_file "${PGPLOT_DIR:-/nonexistent}/grfont.dat" "PGPLOT font file present"
     t_file "${TEMPO:-/nonexistent}/obsys.dat"       "tempo observatory table present"
 fi
 
 # The %environment block puts the dedisp libraries on LD_LIBRARY_PATH.
-# Note that %post line 52 writes `LD_LIBRARY_PATH=LD_LIBRARY_PATH:...`
-# with a missing `$`, so this checks the runtime value, not the build one.
 if [ "$HAS_GPU_STACK" -eq 1 ]; then
     case ":${LD_LIBRARY_PATH:-}:" in
         *:/usr/local/lib:*|*:/usr/local/lib/:*)
@@ -294,7 +294,7 @@ if [ "$HAS_CPU_STACK" -eq 1 ]; then
     BINS+=(readfile rfifind prepdata prepfold accelsearch realfft exploredat
            prepsubband single_pulse_search.py DDplan.py)
     # tempo / psrcat
-    BINS+=(tempo psrcat)
+    BINS+=(tempo tempo2 psrcat)
     # sigproc (SixByNine)
     BINS+=(header filterbank dedisperse fake decimate reader)
     # RFI mitigation
@@ -350,6 +350,7 @@ if [ "$HAS_CPU_STACK" -eq 1 ]; then
     t_runs "prepdata runs"          prepdata
     t_runs "accelsearch runs"       accelsearch
     t_runs "tempo runs"             tempo -h
+    t_runs "tempo2 runs"            tempo2 -h
     t_runs "rficlean runs"          rficlean
     t_runs "iqrm_apollo_cli runs"   iqrm_apollo_cli --help
     t_runs "your_header.py runs"    your_header.py --help
@@ -376,10 +377,11 @@ fi
 section "CUDA objects compiled for the expected architectures"
 # --------------------------------------------------------------------------
 
-# The Singularity recipe rewrites dedisp's Makefile.inc from `sm_30` to
-# `all-major`. Without a GPU we cannot run a kernel, but we can read the
-# fatbin and confirm the right SM targets are embedded -- which is the thing
-# that silently breaks when that sed stops matching.
+# The recipes build dedisp, psrdada and Heimdall with -arch=all-major, where
+# each would otherwise default to a single target (sm_30, which CUDA 11
+# refuses, or nvcc's sm_52). Without a GPU we cannot run a kernel, but we can
+# read the fatbin and confirm the right SM targets are embedded -- which is
+# the thing that silently breaks when a build stops taking the flag.
 if [ "$HAS_GPU_STACK" -eq 1 ]; then
     DEDISP_LIB=""
     for cand in /usr/local/lib/libdedisp.so /usr/local/lib/libdedisp.a \
@@ -408,6 +410,60 @@ if [ "$HAS_GPU_STACK" -eq 1 ]; then
             esac
         else
             skip "libdedisp SM architectures" "cuobjdump not available"
+        fi
+    fi
+
+    if command -v heimdall >/dev/null 2>&1 && command -v cuobjdump >/dev/null 2>&1; then
+        HD=$(command -v heimdall)
+        ARCHES=$(cuobjdump --list-elf "$HD" 2>/dev/null \
+                 | grep -oE 'sm_[0-9]+' | sort -u | tr '\n' ' ')
+        NARCH=$(printf '%s' "$ARCHES" | wc -w)
+        if [ "$NARCH" -ge 3 ]; then
+            pass "heimdall targets multiple SM architectures: $ARCHES"
+        else
+            fail "heimdall targets multiple SM architectures" \
+                 "found only: ${ARCHES:-none} -- did make get CUDA_NVCC_FLAGS=-arch=all-major?"
+        fi
+        case " $ARCHES " in
+            *" sm_80 "*) pass "heimdall includes sm_80 (Ampere)" ;;
+            *) fail "heimdall includes sm_80 (Ampere)" "found: ${ARCHES:-none}" ;;
+        esac
+        # Built without -O, the host side of Heimdall's .cu files keeps
+        # Thrust's helpers as real functions -- 25 of them named
+        # raw_pointer_cast -- and runs about 3.7x slower. Optimised, they are
+        # inlined away. Count them in the symbol table: grepping the binary
+        # also finds the name in the debug info, which -g keeps either way.
+        # The image has no nm, so a few lines of python read the ELF.
+        UNINLINED=$(python - "$HD" <<'PY'
+import struct
+import sys
+
+data = open(sys.argv[1], "rb").read()
+(shoff,) = struct.unpack_from("<Q", data, 0x28)
+shentsize, shnum = struct.unpack_from("<HH", data, 0x3A)
+sections = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + i * shentsize)
+            for i in range(shnum)]
+count = -1  # no symbol table: stripped
+for _, kind, _, _, offset, size, link, _, _, _ in sections:
+    if kind != 2:  # SHT_SYMTAB
+        continue
+    count = max(count, 0)
+    strings = sections[link][4]
+    for i in range(size // 24):
+        name, info = struct.unpack_from("<IB", data, offset + i * 24)
+        start = strings + name
+        if info & 0xF == 2 and b"raw_pointer_cast" in data[start:data.index(b"\0", start)]:
+            count += 1  # STT_FUNC
+print(count)
+PY
+)
+        if [ "$UNINLINED" = 0 ]; then
+            pass "heimdall's CUDA host code is optimised"
+        elif [ "$UNINLINED" = -1 ]; then
+            skip "heimdall's CUDA host code is optimised" "heimdall is stripped"
+        else
+            fail "heimdall's CUDA host code is optimised" \
+                 "${UNINLINED:-?} raw_pointer_cast functions not inlined: built without -O?"
         fi
     fi
 
@@ -598,6 +654,39 @@ d = y.get_data(0, 128)
 assert d.shape[0] == 128, d.shape
 assert d.shape[1] == y.your_header.nchans, d.shape
 "
+        # prepfold -timing makes its polycos with tempo2, which PRESTO uses
+        # in place of TEMPO since 2026. A small GBT filterbank of its own,
+        # since the observatory has to be one tempo2 knows.
+        TFIL="$SCRATCH/timing.fil"
+        python - "$TFIL" <<'PY'
+import struct, sys
+import numpy as np
+
+def s(key):
+    return struct.pack("i", len(key)) + key.encode()
+
+head = s("HEADER_START")
+for key, val in dict(telescope_id=6, machine_id=10, data_type=1, nifs=1,
+                     nbits=8, nchans=64, barycentric=0,
+                     source_name="J0000+0000", src_raj=0.0, src_dej=0.0,
+                     tstart=60000.0, tsamp=0.001, fch1=1500.0,
+                     foff=-1.0).items():
+    head += s(key) + (s(val) if isinstance(val, str) else
+                      struct.pack("i" if isinstance(val, int) else "d", val))
+head += s("HEADER_END")
+t = np.arange(8192) * 0.001
+data = np.random.default_rng(1).normal(64, 8, (t.size, 64))
+data[(t * 4.0) % 1.0 < 0.02] += 40  # a 4 Hz pulsar
+with open(sys.argv[1], "wb") as f:
+    f.write(head + np.clip(data, 0, 255).astype(np.uint8).tobytes())
+PY
+        printf '%s\n' "PSRJ J0000+0000" "RAJ 00:00:00.0" "DECJ +00:00:00.0" \
+            "F0 4.0" "PEPOCH 60000" "DM 0" > "$SCRATCH/timing.par"
+        t_ok "PRESTO prepfold -timing folds with tempo2 polycos" \
+            prepfold -timing "$SCRATCH/timing.par" -noxwin \
+                     -o "$SCRATCH/timing" "$TFIL"
+        t_file "$SCRATCH/timing_PSR_0000+0000.pfd.polycos" "prepfold wrote its polycos"
+
         if command -v yapp_viewmetadata >/dev/null 2>&1; then
             t_ok "YAPP reads the filterbank metadata" yapp_viewmetadata "$FIL"
         else

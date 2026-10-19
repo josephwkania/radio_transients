@@ -3,3 +3,8 @@
 *~
 __pycache__/
 *.pyc
+# rt-run packaging and tests
+*.egg-info/
+build/
+dist/
+.rt-run-test.*/

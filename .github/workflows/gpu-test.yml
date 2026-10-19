@@ -7,12 +7,12 @@ name: gpu test
 #
 # Deliberately not triggered by `pull_request`: a self-hosted runner will
 # happily execute code from a fork's pull request, which is a bad idea. Runs
-# on demand, on a schedule, and after a successful build of master.
+# on demand, on a schedule, and after a successful build of main.
 
 on:
   workflow_run:
     workflows: ["build, test, push"]
-    branches: [master]
+    branches: [main]
     types: [completed]
   schedule:
     - cron: '0 9 * * 1'

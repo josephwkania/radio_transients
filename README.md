@@ -34,6 +34,7 @@ Contains everything (CPU+GPU)
     riptide        https://github.com/v-morello/riptide
     sigproc        https://github.com/SixByNine/sigproc
     Tempo          http://tempo.sourceforge.net/
+    tempo2         https://bitbucket.org/psrsoft/tempo2
     RFIClean       https://github.com/ymaan4/RFIClean
     YAPP           https://github.com/jayanthc/yapp
     your           https://github.com/thepetabyteproject/your
@@ -57,6 +58,7 @@ Contains CPU based programs
     riptide
     sigproc
     Tempo 
+    tempo2
     RFIClean
     YAPP  
     your
@@ -108,6 +110,168 @@ Any driver from 525 up runs either image, so 11.8 is the safe default. 12.9
 would add Blackwell support and ~1.5 G per image with it; CUDA 13 does not
 build, as dedisp does not compile against its Thrust.
 
+### Build flags
+
+Each program is built at its upstream's own optimisation level -- mostly
+`-O2`, `-O3` where the upstream chose it. Passing `-O3` to everything buys
+nothing measurable: Heimdall, for one, ran as fast at `-O2` as at `-O3`.
+The recipes never export `CFLAGS`. An exported `CFLAGS` once left psrdada,
+sigproc and Heimdall's CUDA host code with no `-O` at all, Heimdall 3.7x
+slower for it. Each autoconf build now checks it got `-O2`, and the build stops if
+not.
+
+GPU code is built for every major GPU generation (`-arch=all-major`), so one
+image runs on any card. Images built before October 2026 ran Heimdall's GPU
+code from sm_52 PTX that the driver recompiled at startup. Against them, the
+candidates are the same, but slightly more of them differ in the last digit
+of S/N: different GPU code rounds differently.
+
+The published images run on any x86-64 (or aarch64) CPU: nothing is built
+with `-march`. Four programs whose upstreams use it -- PRESTO, iqrm_apollo,
+riptide and RFIClean -- can be built for a particular CPU instead. PRESTO
+documents `accelsearch` as 1.5-2x faster with AVX2 and FMA:
+
+    apptainer build --build-arg MARCH=native rt_cpu.sif Singularity.cpu
+    apptainer build --build-arg MARCH=x86-64-v3 rt_cpu.sif Singularity.cpu
+
+`Singularity`, `Singularity.cpu` and `Singularity.arm` take it, and the image
+records it in its `Build-march` label. Such an image is only for CPUs that
+have what it was built for -- elsewhere it dies with "illegal instruction" --
+and fused multiply-adds change floating-point results in the last bits.
+Install it with `rt-run install --from`. `rt-run update` pulls the published,
+portable image in its place.
+
+### Running the tools from the host
+
+`rt-run` puts the container's tools on your `PATH`, so `heimdall ...` works
+without a `singularity exec` line, and it bind-mounts the directories your
+arguments name. It needs `python3` (3.8 or newer) on the host, and nothing
+else.
+
+Install it with pip, then let it pull an image:
+
+    pipx install git+https://github.com/josephwkania/radio_transients    # or pip install --user
+    rt-run install gpu    # or full, cpu, arm, full-cuda12.6, gpu-cuda12.6
+
+Or, with an image you already have, let the image install it:
+
+    singularity run --app install radio_transients_gpu.sif
+
+Either way, then:
+
+    export PATH="$PATH:$HOME/.local/share/radio_transients/bin"    # and in ~/.bashrc
+
+    heimdall -f /data/obs/x.fil -dm 0 1000
+    your_header.py -f /data/obs/x.fil
+
+With no variant, `rt-run install` picks arm on aarch64, full when `nvidia-smi`
+is found, and cpu otherwise. `rt-run install --from radio_transients_gpu.sif`
+installs an image you have from the host side. Images built before `rt-run`
+existed have neither the `install` app nor the label saying which variant they
+are, so for those, name it: `rt-run install gpu --from old.sif`.
+
+- `rt-run update` pulls the image again; the tags are rebuilt every week. It
+  also takes the copy of `rt-run` inside the new image when that is at least as
+  new as yours, so the launcher keeps pace with the images by itself.
+- `rt-run list` shows the tools it linked: the programs the recipes build, and
+  the scripts of the Python packages they install from source. Anything else in
+  the image runs as `rt-run COMMAND`, e.g. `rt-run python script.py`.
+- `rt-run uninstall` removes the links, and the image if `rt-run` pulled it.
+
+`rt-run list` also shows when the image was pulled, where from, when it was
+built, and its digest: the registry's fingerprint for exactly that build.
+The tags move every week; a digest never does, and
+
+    rt-run install gpu --digest sha256:...
+
+installs that same build again, here or anywhere. `rt-run` pulls by digest
+whenever the registry will say what a tag points at, and `update` uses it to
+download nothing when the tag hasn't moved.
+`~/.local/share/radio_transients/history` keeps a line for every install and
+update -- time, tag, build date, source, digest, signature check -- so you can
+tell which image a result was produced with.
+
+CI signs every image it publishes, with [cosign](https://docs.sigstore.dev/)'s
+keyless signing: the signature says the image was built by
+`build-test-push.yml` on `main`, with GitHub vouching for that, so there is
+no key to leak. When `cosign` is installed, `rt-run install` and `update`
+check that signature before pulling, in about a second, and refuse an image
+without it; the pull then checks the download against the signed digest as it
+arrives. Without `cosign` they warn and go ahead. `RT_VERIFY=require` refuses
+any image that can't be checked, including one installed `--from` a file, and
+`RT_VERIFY=0` skips the check -- needed for images published before signing
+began. `rt-run list` says how the installed image fared. To check by hand:
+
+    cosign verify \
+      --certificate-identity https://github.com/josephwkania/radio_transients/.github/workflows/build-test-push.yml@refs/heads/main \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      ghcr.io/josephwkania/radio_transients:gpu
+
+Each link runs `apptainer exec` (or `singularity exec`) on the installed image,
+with `--nv` for the GPU images when the host has `nvidia-smi`. An argument
+naming a path outside `$HOME`, `/tmp` and the current directory -- the value in
+`--opt=/path` included -- has the filesystem it is on bind-mounted at the same
+place, so paths mean the same inside and out: `/data` for `/data/obs/x.fil`,
+or `/lustre/project` if that is where a network filesystem is mounted. Tools
+can then reach the files around the ones they are given, as they would on the
+host. Paths under the container's own system
+directories (`/usr`, `/etc`, `/opt`, ...) are never bound over them. A path it
+can't see, such as one inside a config file, needs `RT_BIND=/data,/scratch`.
+`RT_DEBUG=1` prints the command instead of running it; `rt-run --help` and the
+top of `src/rt_run.py` list the other settings.
+
+Appending to `PATH`, as above, keeps any host command of the same name ahead
+of the container's.
+
+Some safeguards are built in:
+
+- `rt-run` refuses to run, or install, if anyone else could change its copy,
+  its state, its links or the image -- they could then run code as you. That
+  matters when `RT_HOME` is on group-writable project storage; the message
+  says what to `chmod`. A group that is yours alone, as Ubuntu and Red Hat
+  give each user, doesn't count.
+- It won't install into a directory that already holds other files, and
+  `uninstall` only touches a directory `rt-run` has marked as its own, so a
+  mistyped `RT_HOME` can't cost you files.
+- Installs, updates and uninstalls in one `RT_HOME` take turns.
+- A pull that can't fit is refused before it starts.
+- With `cosign` installed, an image CI didn't sign is refused before it is
+  pulled (above).
+- The image's own top-level directories, such as `/fetch`, are never mounted
+  over. `RT_AUTOBIND=0` turns off automatic mounts altogether, leaving only
+  what `RT_BIND` names. `install` names any tool that shares a name with a command
+already on your `PATH`, and says which of the two will run; `rt-run list` says
+the same for the `PATH` you have now. It never replaces a file it didn't make.
+On a host with no `python3`, the links say so rather than failing obscurely.
+
+### Under Slurm
+
+The links work in batch jobs as they do on a login node. On a two-GPU node
+with Slurm's cgroup device limits, each job saw only the GPU it was given --
+as GPU 0, so `-gpu_id 0` is right -- two jobs ran side by side on different
+GPUs, and `scancel` stopped the container and everything in it.
+
+    #!/bin/bash
+    #SBATCH --gres=gpu:1
+    #SBATCH --mem=8G
+    #SBATCH --time=1:00:00
+
+    heimdall -f /data/obs/x.fil -dm 0 1000 -gpu_id 0
+
+What depends on the site:
+
+- `--nv` is decided on the node a tool runs on, so CPU nodes don't get it.
+- If apptainer is a module, a job that never runs `module load apptainer`
+  still works: `rt-run` falls back to the apptainer that `install` or
+  `update` last ran with.
+- If jobs don't inherit your environment (`--export=NONE`), add the
+  `export PATH=...` line to the script, or call the links by full path.
+- A per-job `TMPDIR` outside `/tmp` is bind-mounted automatically.
+- The image is 1 to 7 G. If your home quota can't take it, set `RT_HOME` to
+  storage every node sees and that isn't purged, such as a project
+  directory, for `rt-run install`. The links find it from then on without
+  `RT_HOME` being set.
+
 ### How to use
 
 Your `$HOME` automatically gets mounted.
@@ -121,9 +285,17 @@ will mount `/data` to `/mnt`, give you GPU access, and drop you into the interac
 `singularity exec --nv -B /data:/mnt radio_transients_gpu.sif your_heimdall.py -f /mnt/data.fil` 
 will mount `/data` to `/mnt`, give you GPU access, and run your_heimdall.py without entering the container.
 
+`singularity run IMAGE COMMAND ...` does the same as `exec`. With no command,
+it opens a shell -- except in the full `radio_transients` image, where it runs
+`your_heimdall.py`, so `singularity run radio_transients.sif -f /mnt/data.fil`
+works too.
+
 All the Python scripts are installed in a Conda environment `RT`, this environment is automatically loaded.
 
-You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`
+You can see the commits and corresponding dates by running `singularity inspect radio_transients.sif`.
+Its `Version` label is the same in every image: the version of `rt-run`
+inside it, which is also the version on PyPI. `Build-date` is the day the
+image was built.
 
 ### Testing
 
@@ -172,6 +344,11 @@ Skips are expected: a variant is not asked for tools it does not ship, and the
 GPU-less suite skips assertions that need real hardware. The arm figures come
 from a native aarch64 build.
 
+`test_rt_run.py` tests `rt-run` itself, against a stub runtime, so it needs
+neither Singularity nor an image: `pip install . pytest && pytest`.
+`test_recipes.py`, run the same way, checks the recipes without building
+them.
+
 `tests/README.md` explains what each layer catches and why, including the
 checks that exist specifically to catch a passing-but-wrong result -- such as
 the negative control that fails a dedisperser which ignores its DM argument.
@@ -181,6 +358,16 @@ the negative control that fails a dedisperser which ignores its DM argument.
 `.github/workflows/build-test-push.yml` builds all four variants on every push
 that touches a recipe or the tests, runs `container_test.sh` against each, and
 pushes to GHCR only if the tests pass -- an image that fails is never tagged.
+From `main`, it then signs each image it pushed with cosign.
+The tests include `singularity run`, and installing `rt-run` from the image
+just built, both with its `install` app and from the host. `rt-run.yml` lints,
+tests and builds `rt-run` on its own, in a minute, when only it changes.
+`pypi.yml` uploads a `.dev` build to TestPyPI and installs it back from
+there, as a dry run, on every pull request (except from forks) and push to
+`main` that changes the package, and when run by hand from the Actions tab.
+When a GitHub release is published it does the same, then publishes to PyPI.
+Both need PyPI to trust this repository first -- the workflow's header says
+how to set that up.
 `gpu-test.yml` runs the GPU suite on a self-hosted runner with a real card.
 
 A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
