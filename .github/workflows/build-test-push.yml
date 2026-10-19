@@ -171,7 +171,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libseccomp-dev pkg-config \
-            uidmap squashfs-tools fakeroot cryptsetup tzdata git
+            uidmap squashfs-tools squashfuse fakeroot cryptsetup tzdata git
 
       - name: Set up Go (arm64)
         if: matrix.runner == 'ubuntu-24.04-arm'
@@ -187,6 +187,19 @@ jobs:
           ./mconfig
           make -C builddir -j"$(nproc)"
           sudo make -C builddir install
+          # Ubuntu 24.04's AppArmor forbids unprivileged user namespaces, and
+          # only the .deb installs the profile that exempts apptainer. Without
+          # it every unprivileged exec fails with "Operation not permitted".
+          # This is the profile apptainer's INSTALL.md gives for source builds.
+          sudo tee /etc/apparmor.d/apptainer > /dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile apptainer /usr/local/libexec/apptainer/bin/starter{,-suid} flags=(unconfined) {
+            userns,
+            include if exists <local/apptainer>
+          }
+          EOF
+          sudo systemctl reload apparmor
           apptainer --version
 
       # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor, so
@@ -211,6 +224,9 @@ jobs:
       # The runner has no GPU, which is exactly what the suite is written for.
       - name: Test
         run: |
+          # The default shell has no pipefail, so without this the tee
+          # would hide a failing suite, or an image that will not start.
+          set -o pipefail
           apptainer exec \
             --bind "$PWD/tests:/tests" \
             radio_transients_${{ matrix.tag }}.sif \
