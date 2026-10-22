@@ -12,8 +12,8 @@ From: arm64v8/ubuntu:22.04
     # `--build-arg MARCH=native` (or armv8.2-a, ...) builds the tools whose
     # upstreams use -march -- PRESTO, iqrm_apollo, riptide, RFIClean -- for
     # that CPU. Off by default: the published images run on any machine of
-    # the architecture, and CI refuses to publish anything else. See "Build
-    # flags" in the README.
+    # the architecture, and CI refuses to publish anything else. See
+    # docs/building.md.
     MARCH=none
 
 %post

@@ -9,7 +9,7 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # `--build-arg MARCH=native` (or x86-64-v3, ...) builds the tools whose
     # upstreams use -march -- PRESTO, iqrm_apollo, riptide, RFIClean -- for
     # that CPU. Off by default: the published images run on any x86-64, and
-    # CI refuses to publish anything else. See "Build flags" in the README.
+    # CI refuses to publish anything else. See docs/building.md.
     MARCH=none
 
 
