@@ -40,7 +40,7 @@ From: arm64v8/ubuntu:22.04
     conda init
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
-    conda create -y --name RT python=3.10
+    conda create -y --name RT python=3.11
     conda activate RT
 
     # As described in https://github.com/hpcng/singularity/issues/5075#issuecomment-594391772

@@ -238,8 +238,8 @@ else
     fail "conda env RT is active" "CONDA_DEFAULT_ENV=${CONDA_DEFAULT_ENV:-<unset>}"
 fi
 
-# Every variant's conda env is on 3.10, arm included since it moved to conda.
-WANT_PY=3.10
+# Every variant's conda env is on 3.11, arm included since it moved to conda.
+WANT_PY=3.11
 PYVER=$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
 if [ "$PYVER" = "$WANT_PY" ]; then
     pass "python is $WANT_PY (got $PYVER)"
@@ -275,7 +275,7 @@ fi
 # already works around for libNVVM. Nothing at runtime needs the compiler
 # driver (CuPy compiles through NVRTC, numba through libNVVM), so read the
 # toolkit version from the CUDA runtime's own soname instead:
-# libcudart.so.11.8.89 -> 11.8.89.
+# libcudart.so.12.6.77 -> 12.6.77.
 cuda_version() {
     local -a found
     found=(/usr/local/cuda/lib64/libcudart.so.*.*.*)
@@ -558,19 +558,12 @@ else
 fi
 
 if [ "$HAS_GPU_STACK" -eq 1 ] && [ "$QUICK" -eq 0 ]; then
-    # The recipe derives its tensorflow from the CUDA it was built with: 2.14 is
-    # the last release for CUDA 11.8, 2.15 the first that works on CUDA 12. Derive
-    # the expectation the same way so this check follows CUDA_VERSION instead of
-    # having to be edited alongside it. nvcc is gone by this point in the build,
-    # so use the runtime soname (see cuda_version).
-    if [ "$(cuda_version | cut -d. -f1)" -ge 12 ] 2>/dev/null; then
-        WANT_TF=2.15
-    else
-        WANT_TF=2.14
-    fi
+    # The recipes build CUDA 12 only, with tensorflow 2.15. (2.14, the last
+    # release for CUDA 11.8, needs a tensorrt with no wheel for python 3.11.)
+    WANT_TF=2.15
     TFVER=$(python -c 'import tensorflow as tf; print(tf.__version__)' 2>/dev/null)
     case "$TFVER" in
-        "$WANT_TF"*) pass "tensorflow is $WANT_TF.x, matching this variant's CUDA (got $TFVER)" ;;
+        "$WANT_TF"*) pass "tensorflow is $WANT_TF.x (got $TFVER)" ;;
         "")          fail "tensorflow is $WANT_TF.x" "tensorflow did not import" ;;
         *)           fail "tensorflow is $WANT_TF.x" "got $TFVER" ;;
     esac

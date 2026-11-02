@@ -59,7 +59,7 @@ dedisperser which ignores its DM argument.
 
 ## Continuous integration
 
-- `build-test-push.yml` builds all six images on every push and pull request
+- `build-test-push.yml` builds the four images on every push and pull request
   that touches a recipe or the tests, runs `container_test.sh` against each,
   and pushes to GHCR only from `main` and only if the tests pass -- an image
   that fails is never tagged. It then signs each image it pushed with cosign.
@@ -76,6 +76,13 @@ A `lint` job runs `black`, `flake8`, `pylint` and `shellcheck` over `tests/`.
 The linter configs live in `tests/.flake8` and `tests/.pylintrc`, and CI passes
 no flags of its own, so running the tools by hand gives the same answer CI
 does.
+
+The CUDA 11.8 builds stopped at v0.3.0. On the first run on `main` after
+that, the workflow copied the last `latest` and `gpu` to `latest-cuda11.8`
+and `gpu-cuda11.8` (`.github/ghcr-tag.sh` copies the manifest, so the digest
+and signature come too) before pushing the CUDA 12.6 builds over them. It
+leaves those tags alone from then on. `latest-cuda12.6` and `gpu-cuda12.6`
+are re-pointed at each new `latest` and `gpu`.
 
 ### Weekly rebuilds
 
