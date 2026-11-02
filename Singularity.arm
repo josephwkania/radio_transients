@@ -85,7 +85,6 @@ From: arm64v8/ubuntu:22.04
     cd tempo
     ./prepare
     ./configure
-    sed -i 's/real\*10 frb/real\*8 frb/' src/bnrydds.f # 10 bit variables are not supported
     make
     make install
     export TEMPO=$PWD # Presto need to know this
