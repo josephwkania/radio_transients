@@ -602,8 +602,10 @@ else
     FIL="$SCRATCH/test.fil"
 
     # Prefer sigproc's own generator: it exercises sigproc as a side effect.
+    # Seeded, as the other generators here are: unseeded, fake reads the
+    # clock, and a failure further down could not be reproduced.
     if command -v fake >/dev/null 2>&1 &&
-       timeout 120 fake -nbits 8 -nchans 128 -tsamp 128 -tobs 8 \
+       timeout 120 fake -nbits 8 -nchans 128 -tsamp 128 -tobs 8 -seed -1234 \
                         -period 250.0 -snrpeak 20 -dm 25 > "$FIL" 2>/dev/null &&
        [ -s "$FIL" ]; then
         pass "sigproc fake generated a filterbank"
