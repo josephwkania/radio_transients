@@ -5,7 +5,7 @@ The README has the quick start. This page covers the details.
 ## Installing
 
     pip install radio-transients      # or pipx install radio-transients
-    rt-run install gpu                # or full, cpu, arm, full-cuda12.6, gpu-cuda12.6
+    rt-run install gpu                # or full, cpu, arm, full-cuda11.8, gpu-cuda11.8
 
 `pip install --user` works on most clusters. On a distro Python marked
 "externally managed" (Ubuntu 23.04+, Debian 12) use pipx or a venv instead.

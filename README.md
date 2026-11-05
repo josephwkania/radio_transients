@@ -17,12 +17,11 @@ there.
 
 | Tag | Contents | Size |
 |---|---|---|
-| `latest` | everything, CUDA 11.8 | 6.7 G |
-| `latest-cuda12.6` | everything, CUDA 12.6 | 7.0 G |
-| `gpu` | GPU tools, CUDA 11.8 | 6.5 G |
-| `gpu-cuda12.6` | GPU tools, CUDA 12.6 | 6.8 G |
+| `latest` | everything, CUDA 12.6 | 7.0 G |
+| `gpu` | GPU tools, CUDA 12.6 | 6.8 G |
 | `cpu` | CPU tools, x86-64 | 1.1 G |
 | `arm` | CPU tools, aarch64 | 1.0 G |
+| `latest-cuda11.8`, `gpu-cuda11.8` | v0.3.0's CUDA 11.8 builds, not updated | 6.7 G, 6.5 G |
 
     singularity pull radio_transients.sif oras://ghcr.io/josephwkania/radio_transients:latest
 
@@ -44,8 +43,8 @@ there.
 | [YAPP](https://github.com/jayanthc/yapp) | ✓ | | ✓ |
 | [will](https://github.com/josephwkania/will) | ✓ | | ✓ |
 
-Pick a CUDA 12.6 tag if your driver branch is CUDA 12; any driver from 525 up
-runs either. The images are rebuilt and re-tested every Monday, so tags move;
+The GPU images need an NVIDIA driver from 525 up; on an older one, use the
+`-cuda11.8` tags. The images are rebuilt and re-tested every Monday, so tags move;
 pull by digest (`...radio_transients@sha256:...`) to pin a build. Every
 published image is signed with cosign
 ([details](https://github.com/josephwkania/radio_transients/blob/main/docs/rt-run.md#signatures)).

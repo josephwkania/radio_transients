@@ -85,8 +85,10 @@ MARKER = ".rt-run-home"
 VARIANTS = {
     "full": "latest",
     "full-cuda12.6": "latest-cuda12.6",
+    "full-cuda11.8": "latest-cuda11.8",
     "gpu": "gpu",
     "gpu-cuda12.6": "gpu-cuda12.6",
+    "gpu-cuda11.8": "gpu-cuda11.8",
     "cpu": "cpu",
     "arm": "arm",
 }
@@ -105,12 +107,13 @@ Usage:
   rt-run --version
 
 VARIANT is one of
-  full           everything, CUDA 11.8 (6.7 G)
-  full-cuda12.6  everything, CUDA 12.6 (7.0 G)
-  gpu            GPU tools only, CUDA 11.8 (6.5 G)
-  gpu-cuda12.6   GPU tools only, CUDA 12.6 (6.8 G)
+  full           everything, CUDA 12.6 (7.0 G)
+  gpu            GPU tools only, CUDA 12.6 (6.8 G)
   cpu            CPU tools only (1.1 G)
   arm            CPU tools on aarch64 (1.0 G)
+  full-cuda11.8  full as of v0.3.0, CUDA 11.8, for drivers older than 525;
+  gpu-cuda11.8   gpu likewise. Neither is rebuilt any more.
+full-cuda12.6 and gpu-cuda12.6 are other names for full and gpu.
 With no VARIANT, `install --from FILE` uses the one FILE was built as, and a
 pull picks arm on aarch64, full when nvidia-smi is found, and cpu otherwise.
 
