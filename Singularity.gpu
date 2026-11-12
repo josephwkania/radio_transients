@@ -2,10 +2,11 @@ Bootstrap: docker
 From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
 
 %arguments
-    # Overridable with `singularity build --build-arg CUDA_VERSION=12.6.3 ...`.
-    # 11.8 stays the default: it is what the published images have always been
-    # and what the CUDA 11 driver branches in the field expect.
-    CUDA_VERSION=11.8.0
+    # Any CUDA 12, e.g. `singularity build --build-arg CUDA_VERSION=12.9.1 ...`.
+    # 11.8 was the default until v0.3.0; tensorflow 2.14, its last release,
+    # needs a tensorrt with no wheel for this python. Those builds stay on GHCR
+    # as the -cuda11.8 tags.
+    CUDA_VERSION=12.6.3
 
 
 %files
@@ -15,6 +16,10 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     src/rt_run.py /opt/rt-run/src/rt_run.py
 
 %post
+    case "{{ CUDA_VERSION }}" in
+        12.*) ;;
+        *) echo "CUDA_VERSION {{ CUDA_VERSION }}: only CUDA 12 builds; see docs/building.md" >&2; exit 1 ;;
+    esac
     apt-get update # update and install packages we need for the build
     export DEBIAN_FRONTEND=noninteractive 
     export TZ=Etc/UTC
@@ -28,7 +33,7 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     conda init
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
-    conda create -y --name RT python=3.10
+    conda create -y --name RT python=3.11
     conda activate RT
 
     # TensorFlow 2.15 requires numpy<2, and FETCH needs it too. Pinning numpy
@@ -48,16 +53,10 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     git clone https://github.com/devanshkv/fetch.git
     cd fetch
     # pip install -r requirements.txt
-    # TensorFlow has to match the CUDA the image was built with: 2.14 is the last
-    # release built against CUDA 11.8, and the first that works on CUDA 12 is
-    # 2.15.1 -- 2.15.0's and-cuda extra still pins a tensorrt with no wheel for
-    # this python. 2.16 is deliberately not used: it moves to Keras 3, which
-    # FETCH is not written against. Derive it rather than pin it, so the recipe
-    # follows CUDA_VERSION.
-    CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+')
-    if [ "${CUDA_MAJOR:-11}" -ge 12 ]; then TF_VERSION=2.15.1; else TF_VERSION=2.14; fi
-    echo "Installing tensorflow $TF_VERSION for CUDA ${CUDA_MAJOR:-unknown}"
-    pip install "tensorflow[and-cuda]==$TF_VERSION"
+    # 2.15.1 is the first tensorflow that works on CUDA 12 (2.15.0's and-cuda
+    # extra still pins a tensorrt with no wheel for this python), and the last
+    # before 2.16 moves to Keras 3, which FETCH is not written against.
+    pip install "tensorflow[and-cuda]==2.15.1"
     pip install .
     echo "Fetch Built at commit $(git rev-parse HEAD) which was on $(git log -1 --format=%cd)"  >> "$SINGULARITY_LABELS"
     cd ~ && rm -rf fetch
@@ -167,7 +166,7 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     conda clean --all
 
     # tensorflow[and-cuda] ships libNVVM and libdevice inside the
-    # nvidia-cuda-nvcc-cu11 wheel, but the apt purge above removes
+    # nvidia-cuda-nvcc-cu12 wheel, but the apt purge above removes
     # /usr/local/cuda/nvvm along with cuda-nvcc. numba -- which is how `your`
     # and FETCH's candmaker reach the GPU -- looks for NVVM under CUDA_HOME or
     # /usr/local/cuda, finds nothing, and every GPU path in `your` fails while
@@ -194,7 +193,7 @@ From:  nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     # The GHCR tag this build is published as: what `rt-run install --from`
     # records, and what `rt-run update` pulls.
     case "{{ CUDA_VERSION }}" in
-        11.8*) RT_TAG=gpu ;;
+        12.6*) RT_TAG=gpu ;;
         *) RT_TAG=gpu-cuda$(echo "{{ CUDA_VERSION }}" | cut -d. -f1-2) ;;
     esac
     echo "RT_TAG $RT_TAG" >> "$SINGULARITY_LABELS"

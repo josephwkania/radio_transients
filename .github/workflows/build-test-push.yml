@@ -17,6 +17,7 @@ on:
       - '!tests/rt_run_fakes.py'
       - '!tests/test_recipes.py'
       - '.github/workflows/build-test-push.yml'
+      - '.github/ghcr-tag.sh'
   pull_request:
     paths:
       - 'Singularity*'
@@ -87,7 +88,7 @@ jobs:
 
       - name: shellcheck
         working-directory: tests
-        run: shellcheck *.sh
+        run: shellcheck *.sh ../.github/*.sh
 
   build:
     name: ${{ matrix.tag }}
@@ -110,26 +111,20 @@ jobs:
             tag: cpu
             recipe: Singularity.cpu
             runner: ubuntu-24.04
-          # The two GPU recipes take CUDA_VERSION as a build arg. Each is built
-          # twice: once on the 11.8 default, which is what the published tags
-          # have always been, and once on 12.6 for sites on a CUDA 12 driver
-          # branch. The recipe picks its tensorflow to match.
+          # The GPU images are CUDA 12.6. They were 11.8 until v0.3.0; the last
+          # 11.8 builds stay on GHCR as `frozen`, never rebuilt, for drivers
+          # older than 525. `alias` keeps the -cuda12.6 tags, from when both
+          # were built, following the image they now are.
           - variant: gpu
             tag: gpu
-            recipe: Singularity.gpu
-            runner: ubuntu-24.04
-          - variant: gpu
-            tag: gpu-cuda12.6
-            cuda: 12.6.3
+            alias: gpu-cuda12.6
+            frozen: gpu-cuda11.8
             recipe: Singularity.gpu
             runner: ubuntu-24.04
           - variant: latest
             tag: latest
-            recipe: Singularity
-            runner: ubuntu-24.04
-          - variant: latest
-            tag: latest-cuda12.6
-            cuda: 12.6.3
+            alias: latest-cuda12.6
+            frozen: latest-cuda11.8
             recipe: Singularity
             runner: ubuntu-24.04
           # Singularity.arm now bootstraps from arm64v8/ubuntu, which matches
@@ -206,14 +201,8 @@ jobs:
       # `--fakeroot` is unreliable on these runners. sudo always works, and
       # the runner is disposable anyway.
       - name: Build ${{ matrix.recipe }}
-        env:
-          CUDA_VERSION: ${{ matrix.cuda }}
         run: |
-          # Empty for the non-CUDA recipes and for the default 11.8 builds,
-          # which take the value from the recipe's own %arguments block.
-          args=()
-          [ -n "$CUDA_VERSION" ] && args+=(--build-arg "CUDA_VERSION=$CUDA_VERSION")
-          sudo apptainer build "${args[@]}" \
+          sudo apptainer build \
             radio_transients_${{ matrix.tag }}.sif \
             ${{ matrix.recipe }}
           sudo chown "$USER" radio_transients_${{ matrix.tag }}.sif
@@ -289,6 +278,39 @@ jobs:
           name: tap-${{ matrix.tag }}
           path: test-results-${{ matrix.tag }}.tap
 
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      # Before the first 12.6 build replaces it, give the last 11.8 build its
+      # own tag; once that tag exists it is left alone. The build predates
+      # signing, so sign it here, once: build-test-push.yml on main built it.
+      - name: Keep the last CUDA 11.8 build
+        if: matrix.frozen && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          TAG: ${{ matrix.tag }}
+          FROZEN: ${{ matrix.frozen }}
+          REPO: ${{ github.repository }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          digest=$(.github/ghcr-tag.sh --if-missing "$TAG" "$FROZEN")
+          verify() {
+            cosign verify \
+              --certificate-identity "https://github.com/$REPO/.github/workflows/build-test-push.yml@refs/heads/main" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$IMAGE@$digest" > /dev/null
+          }
+          if ! verify 2> /dev/null; then
+            echo "$GITHUB_TOKEN" | cosign login ghcr.io -u "$ACTOR" --password-stdin
+            cosign sign --yes "$IMAGE@$digest"
+            verify
+          fi
+
       # Only reached when the tests passed, and only from main: never on a
       # pull request, and never from "Run workflow" on another branch, which
       # would put an untested branch's images over the published tags.
@@ -299,12 +321,6 @@ jobs:
             --username "${{ github.actor }}" --password-stdin oras://${{ env.REGISTRY }}
           apptainer push radio_transients_${{ matrix.tag }}.sif \
             oras://${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}
-
-      - name: Install cosign
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v4.1.2
-        with:
-          cosign-release: v3.1.3
 
       # Keyless: the signature carries GitHub's word that build-test-push.yml
       # on main made it, and there is no key to keep. rt-run checks it before
@@ -317,6 +333,7 @@ jobs:
           TAG: ${{ matrix.tag }}
           REPO: ${{ github.repository }}
           IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+          ALIAS: ${{ matrix.alias }}
           ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -343,3 +360,5 @@ jobs:
             --certificate-identity "https://github.com/$REPO/.github/workflows/build-test-push.yml@refs/heads/main" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$IMAGE@$digest" > /dev/null
+          # The same digest, so the signature covers the alias too.
+          if [ -n "$ALIAS" ]; then .github/ghcr-tag.sh "$digest" "$ALIAS" > /dev/null; fi

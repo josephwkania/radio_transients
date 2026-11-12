@@ -11,17 +11,19 @@ A built image installs into `rt-run` with `rt-run install --from FILE.sif`.
 ## CUDA versions
 
 `Singularity` and `Singularity.gpu` take the CUDA version as a build argument,
-defaulting to 11.8:
+defaulting to 12.6:
 
     apptainer build radio_transients.sif Singularity
-    apptainer build --build-arg CUDA_VERSION=12.6.3 radio_transients.sif Singularity
+    apptainer build --build-arg CUDA_VERSION=12.9.1 radio_transients.sif Singularity
 
-TensorFlow and cupy follow it: 2.14 is the last release for CUDA 11.8, 2.15.1
-the first that works on 12, and the recipe reads `nvcc --version` to choose.
+Only CUDA 12 builds. FETCH needs TensorFlow 2.14 or 2.15, the last before
+Keras 3; 2.15.1 is the one for CUDA 12, and 2.14, the last for CUDA 11.8,
+needs a TensorRT with no wheel for Python 3.11. The CUDA 11.8 images were the
+default until v0.3.0, and their last builds stay on GHCR, never rebuilt, as
+`latest-cuda11.8` and `gpu-cuda11.8`, for drivers older than 525.
 
-Any driver from 525 up runs either image, so 11.8 is the safe default. 12.9
-would add Blackwell support and ~1.5 G per image with it; CUDA 13 does not
-build, as dedisp does not compile against its Thrust.
+12.9 would add Blackwell support and ~1.5 G per image with it; CUDA 13 does
+not build, as dedisp does not compile against its Thrust.
 
 ## Build flags
 
