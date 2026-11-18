@@ -102,7 +102,9 @@ From: arm64v8/ubuntu:22.04
     apt-get -y clean
     conda install -y meson meson-python ninja
     conda clean -y --all
-    git clone https://github.com/scottransom/presto.git
+    # PRESTO 6.2.0 and later need Python 3.12, and RT is on 3.10, as in the
+    # full image, where FETCH holds it back. Unpin when RT moves up.
+    git clone --branch v6.1.2 https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
     # read_filterbank_header() leaves any field a header lacks uninitialised.

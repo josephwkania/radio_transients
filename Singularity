@@ -167,7 +167,9 @@ From: nvidia/cuda:{{ CUDA_VERSION }}-devel-ubuntu22.04
     apt-get -y install libglib2.0-dev libpng-dev libx11-dev mpich libgsl-dev liberfa-dev
     conda install meson meson-python ninja
     cd /usr/local/
-    git clone https://github.com/scottransom/presto.git
+    # PRESTO 6.2.0 and later need Python 3.12, and RT is on 3.10 until FETCH
+    # moves to torch. Unpin then.
+    git clone --branch v6.1.2 https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
     # read_filterbank_header() leaves any field a header lacks uninitialised.
