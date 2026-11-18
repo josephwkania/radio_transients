@@ -102,9 +102,19 @@ From: arm64v8/ubuntu:22.04
     apt-get -y clean
     conda install -y meson meson-python ninja
     conda clean -y --all
-    git clone https://github.com/scottransom/presto.git
+    # PRESTO 6.2.0 and later need Python 3.12, and RT is on 3.10, as in the
+    # full image, where FETCH holds it back. Unpin when RT moves up.
+    git clone --branch v6.1.2 https://github.com/scottransom/presto.git
     cd presto
     export PRESTO=$PWD
+    # read_filterbank_header() leaves any field a header lacks uninitialised.
+    # sigproc's fake writes no position, so read_filterbank_files() formats a
+    # garbage RA/Dec into a 40-byte string and overruns it: rfifind's
+    # occasional "stack smashing" and gen_bvect() failures on arm. Zero the
+    # struct first, until PRESTO does, and fail if the line it goes after moves.
+    grep -q 'memset(fb, 0' src/sigproc_fb.c ||
+        sed -i 's/^    int barycentric, pulsarcentric;$/&\n    memset(fb, 0, sizeof(sigprocfb));/' src/sigproc_fb.c
+    [ "$(grep -c 'memset(fb, 0' src/sigproc_fb.c)" -eq 1 ] || { echo "PRESTO's src/sigproc_fb.c patch didn't apply" >&2; exit 1; }
     # PRESTO's own default is -O2 -g, which its INSTALL.md measured as fast as
     # -O3. -march, when MARCH asks for it, is its documented speed-up for
     # accelsearch.

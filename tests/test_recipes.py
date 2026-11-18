@@ -91,3 +91,54 @@ def test_march_is_off_unless_asked_for(recipe, march, flag, label, tmp_path):
     )
     assert result.stdout == flag
     assert out.read_text() == f"Build-march {label}\n"
+
+
+# The top of PRESTO's read_filterbank_header(), as of e09680f.
+SIGPROC_FB = """\
+int read_filterbank_header(sigprocfb * fb, FILE * inputfile)
+{
+    char string[HDR_STRBUF];
+    int barycentric, pulsarcentric;
+    /* try to read in the first line of the header */
+"""
+ZEROED = SIGPROC_FB.replace(
+    "pulsarcentric;\n", "pulsarcentric;\n    memset(fb, 0, sizeof(sigprocfb));\n"
+)
+
+
+@pytest.mark.parametrize(
+    "recipe", ["Singularity", "Singularity.cpu", "Singularity.arm"]
+)
+@pytest.mark.parametrize(
+    "upstream, patched",
+    [
+        (SIGPROC_FB, ZEROED),
+        (ZEROED, ZEROED),  # once PRESTO zeroes it, leave it alone
+        (SIGPROC_FB.replace("barycentric, ", ""), None),  # the anchor moved
+    ],
+)
+def test_recipe_zeroes_prestos_filterbank_header(recipe, upstream, patched, tmp_path):
+    text = (HERE.parent / recipe).read_text()
+    # The lines of %post that patch it, run here as the build would run them.
+    lines = [
+        line
+        for line in text.splitlines()
+        if "sigproc_fb.c" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(lines) == 3
+    source = tmp_path / "src" / "sigproc_fb.c"
+    source.parent.mkdir()
+    source.write_text(upstream)
+    result = subprocess.run(
+        ["bash", "-euc", "\n".join(lines)],
+        cwd=tmp_path,
+        check=False,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+    if patched is None:
+        assert result.returncode != 0
+        assert "patch didn't apply" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert source.read_text() == patched
